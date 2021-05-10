@@ -20,7 +20,7 @@ import capa.main
 import capa.rules
 from capa.render import convert_capabilities_to_result_document
 
-RULES_PATH = "capa-rules"
+RULES_PATH = "files/capa-rules"
 
 # should most likely make a global variables init function. ¯\_(ツ)_/¯
 STRINGS_PATH = "strings.txt"
@@ -412,7 +412,7 @@ class PEDataAnalysis:
                 "raw_virtual_size_diff": sect_size_diff,
                 "raw_size": hex(sect.SizeOfRawData),
                 "virtual_size": hex(sect.Misc_VirtualSize),
-                "entropy": sect.get_entropy()
+                "entropy": sect.get_entropy() # if entropy > 7.4 == packed ? based on comments peutils
             }
             self.section_analysis.update({sect_name: sect_analysis})
 
