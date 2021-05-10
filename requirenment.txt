@@ -1,0 +1,6 @@
+python-magic
+python-magic-bin==0.4.14
+yara-python
+pefile
+#flare-capa #ikke samme versjon på git som på pip
+# setup.py install fra capa repo
