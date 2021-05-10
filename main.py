@@ -312,7 +312,7 @@ class PEDataAnalysis:
         self.interesting_imports = list()
         self.section_analysis = dict()
         self.tls = False
-        self.isdll = self.pedata.FILE_HEADER.IMAGE_FILE_DLL
+        self.isdll = self.pedata.is_dll()
         self.is32bit = True if self.pedata.FILE_HEADER.Machine == 0x14c else False
 
         self.__analyze()
@@ -411,7 +411,8 @@ class PEDataAnalysis:
                 "permissions": permissions,
                 "raw_virtual_size_diff": sect_size_diff,
                 "raw_size": hex(sect.SizeOfRawData),
-                "virtual_size": hex(sect.Misc_VirtualSize)
+                "virtual_size": hex(sect.Misc_VirtualSize),
+                "entropy": sect.get_entropy()
             }
             self.section_analysis.update({sect_name: sect_analysis})
 
