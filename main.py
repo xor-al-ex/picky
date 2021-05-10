@@ -69,6 +69,7 @@ class AlreadyAnalyzed(Error):
 class UnwantedPacker(Error):
     pass
 
+
 class AnalyzeFile:
     def __init__(self, path: str):
         global ANALYZED_FILES
@@ -249,9 +250,8 @@ class FLOSSAnalysis:
 
     def __run_floss(self):
         # Forgive me father, for I have sinned.
-        # TODO: change path if using different working dirs
         tempjson = f"{str(uuid.uuid4())}_tmp.json"
-        result = subprocess.run(["floss.exe", "-q", "-o", tempjson, self.path],
+        result = subprocess.run([f"files{os.sep}floss.exe", "-q", "-o", tempjson, self.path],
                                 capture_output=True)
         with open(tempjson, "r") as fp:
             self.json = json.load(fp)
@@ -452,10 +452,17 @@ def check_mkdir(path: str) -> None:
     return
 
 
-def absolute_file_path(dir_path):
-    for dirpath, _, filenames in os.walk(dir_path):
-        for f in filenames:
-            yield os.path.abspath(os.path.join(dirpath, f))
+# Keeps updating at runtime, not a problem but annoyance
+#def absolute_file_path(dir_path):
+#    for dirpath, _, filenames in os.walk(dir_path):
+#        for f in filenames:
+#            yield os.path.abspath(os.path.join(dirpath, f))
+def absolute_file_path(dir_path: str) -> list:
+    flist = list()
+    for root, dirs, files in os.walk(os.path.abspath(dir_path)):
+        for file in files:
+            flist.append(os.path.join(root, file))
+    return flist
 
 
 def bulk_analyze(dir_path: str) -> None:
