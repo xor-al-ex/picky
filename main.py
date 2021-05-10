@@ -15,6 +15,7 @@ import pefile
 
 from datetime import datetime
 from shutil import copyfile
+from multiprocessing import Lock, Process, Queue
 
 import capa.main
 import capa.rules
@@ -32,6 +33,7 @@ with open(FUNCTIONS_PATH, "r") as fp:
     FUNCTIONS_LIST = fp.readlines()
 
 WORK_DIR = "picky_analysis"
+NUMBERS_OF_CORES_TO_USE = 4
 
 # disable logging to suppress capa
 logging.disable(level=logging.WARNING)
@@ -504,11 +506,15 @@ def main():
     parser.add_argument("sample", type=str,
                         help="Path to file or folder with samples. If folder all files will be iterated")
     parser.add_argument("-p", "--dbgprint", action="store_true", help="Print debugging related information.")
+    parser.add_argument("-m", "--multiprocess", type=int,
+                        help="How many processes to use with bulk analysis. Default is 4.")
 
     args = parser.parse_args()
 
     if args.dbgprint:
         logging.getLogger("picky").setLevel(logging.DEBUG)
+
+    if args.multiprocess > 0:
 
     if os.path.isdir(args.sample):
         bulk_analyze(args.sample)
