@@ -182,10 +182,18 @@ class CapaAnalysis:
         doc = convert_capabilities_to_result_document("", RULES, capabilities)
         capa_json = json.loads(capa.render.render_json("", RULES, capabilities))
 
+        rule_hit_loc = dict()
         for rule_name, rule_dict in doc["rules"].items():
-            for match in rule_dict["matches"]:
-                temp_dict = self.__recursive_get_lowest_child_location(match)
-                print("test")
+            rule_hit_loc[rule_name] = dict()
+            for match in rule_dict["matches"].values():
+                temp = self.__recursive_get_lowest_child_location(match)
+                if type(temp) == list:
+                    for m in temp:
+                        for hit, locs in m.items():
+                            tmp_loc_list = rule_hit_loc[rule_name].get(hit, list())
+                            rule_hit_loc[rule_name].update({hit: tmp_loc_list + locs})
+                else:
+                    rule_hit_loc.update({rule_name: temp})
             #self.__extract_capa_rule_location(rule_name, rule_dict)
             # not in use
             # if tmp_dict and tmp_dict.values():
@@ -194,32 +202,43 @@ class CapaAnalysis:
             #     self.capa_dict.update({rule_name: new_dict})
 
     def __recursive_get_lowest_child_location(self, entry: dict):
-        # If it has matches, then it is too far up, down further
-        if hasattr(entry, "matches"):
-            self.__recursive_get_lowest_child_location(entry["matches"])
-            return
-
         # if success is false, then leave
         if not entry["success"]:
-            return
+            return {}
 
         # if has success and no more children, then we are lowest
         if entry["success"] and entry["children"] == []:
             # trying to extract API call
-            if hasattr(entry["node"], "feature"):
-                if hasattr(entry["node"]["feature"], "api"):
+            # test if feature key
+            if "feature" in entry["node"]:
+                if "api" in entry["node"]["feature"]:
                     dict_key = entry["node"]["feature"]["api"]
+                elif "characteristic" in entry["node"]["feature"]:
+                    want_list = ["indirect call", "nzxor"]
+                    if entry["node"]["feature"]["characteristic"] in want_list:
+                        dict_key = entry["node"]["feature"]["characteristic"]
+                    else:
+                        print("is missed?")
+                        return {}
                 else:
                     print("Which feature?")
                     dict_key = "??"
+            else:
+                print("No feature???")
+                dict_key = "no feature"
             locs = [hex(loc) for loc in entry["locations"]]
 
             # returns a small dict with found item at locations
             return {dict_key: locs}
 
         else:
+            # gives nested list: make temp dir and update like above?
+            children_matches = list()
             for child in entry["children"]:
-                self.__recursive_get_lowest_child_location(child)
+                tmp = self.__recursive_get_lowest_child_location(child)
+                if tmp:
+                    children_matches.append(tmp)
+            return children_matches
 
 
     def __extract_capa_rule_location(self, rule_name: str, rule_dict: dict) -> None:
