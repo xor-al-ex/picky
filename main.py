@@ -14,6 +14,7 @@ import uuid
 import os
 import re
 import pefile
+import peutils
 import time
 import multiprocessing
 
@@ -320,6 +321,7 @@ class PEDataAnalysis:
         self.tls = False
         self.isdll = self.pedata.is_dll()
         self.is32bit = True if self.pedata.FILE_HEADER.Machine == 0x14c else False
+        self.probably_packed = False
 
         self.__analyze()
 
@@ -408,7 +410,7 @@ class PEDataAnalysis:
                         if getattr(sect, value):
                             permissions.append(perm)
 
-            # check if virtual size is larger than 150% of raw size -> unpacked?
+            # check if virtual size is larger than 150% of raw size -> packed?
             sect_size_diff = True if sect.Misc_VirtualSize > sect.SizeOfRawData * 1.5 else False
 
             sect_analysis = {
@@ -428,6 +430,7 @@ class PEDataAnalysis:
         self.__section_analysis()
         # If .tls in section names we want to know
         self.tls = True if ".tls" in self.section_analysis.keys() else False
+        self.probably_packed = peutils.is_probably_packed(self.pedata)
 
 
 def check_right_pe(path: str) -> bool:
