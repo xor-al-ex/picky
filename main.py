@@ -180,14 +180,47 @@ class CapaAnalysis:
         #doc = render_verbose(meta, RULES, capabilities)
         #doc = convert_capabilities_to_result_document(meta, RULES, capabilities)
         doc = convert_capabilities_to_result_document("", RULES, capabilities)
+        capa_json = json.loads(capa.render.render_json("", RULES, capabilities))
 
         for rule_name, rule_dict in doc["rules"].items():
-            self.__extract_capa_rule_location(rule_name, rule_dict)
+            for match in rule_dict["matches"]:
+                temp_dict = self.__recursive_get_lowest_child_location(match)
+                print("test")
+            #self.__extract_capa_rule_location(rule_name, rule_dict)
             # not in use
             # if tmp_dict and tmp_dict.values():
             #     old_dict = self.capa_dict.get(rule_dict, {})
             #     new_dict = old_dict + tmp_dict
             #     self.capa_dict.update({rule_name: new_dict})
+
+    def __recursive_get_lowest_child_location(self, entry: dict):
+        # If it has matches, then it is too far up, down further
+        if hasattr(entry, "matches"):
+            self.__recursive_get_lowest_child_location(entry["matches"])
+            return
+
+        # if success is false, then leave
+        if not entry["success"]:
+            return
+
+        # if has success and no more children, then we are lowest
+        if entry["success"] and entry["children"] == []:
+            # trying to extract API call
+            if hasattr(entry["node"], "feature"):
+                if hasattr(entry["node"]["feature"], "api"):
+                    dict_key = entry["node"]["feature"]["api"]
+                else:
+                    print("Which feature?")
+                    dict_key = "??"
+            locs = [hex(loc) for loc in entry["locations"]]
+
+            # returns a small dict with found item at locations
+            return {dict_key: locs}
+
+        else:
+            for child in entry["children"]:
+                self.__recursive_get_lowest_child_location(child)
+
 
     def __extract_capa_rule_location(self, rule_name: str, rule_dict: dict) -> None:
         # hex_locations = list()
