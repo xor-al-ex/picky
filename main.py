@@ -1,4 +1,6 @@
 # TODO: Handle files with same name -> hash based name dir and file?
+import queue
+
 import magic
 import yara
 import os.path
@@ -12,16 +14,18 @@ import uuid
 import os
 import re
 import pefile
+import time
+import multiprocessing
 
 from datetime import datetime
 from shutil import copyfile
-from multiprocessing import Lock, Process, Queue
+
 
 import capa.main
 import capa.rules
 from capa.render import convert_capabilities_to_result_document
 
-RULES_PATH = "files/capa-rules"
+RULES_PATH = f"files{os.sep}capa-rules"
 
 # should most likely make a global variables init function. ¯\_(ツ)_/¯
 STRINGS_PATH = "strings.txt"
@@ -87,14 +91,20 @@ class AnalyzeFile:
 
         # use hashes md5 to create unique folder and file name
         self.__calculate_hashes()
-        self.working_dir = WORK_DIR + os.sep + self.hashes["md5"]
+        self.working_dir = os.path.dirname(self.path) + os.sep + WORK_DIR + os.sep + self.hashes["md5"]
 
         # add file to global list or abort analysis
-        if self.hashes["sha256"] in ANALYZED_FILES:
-            print(f"[!] File {self.path} has already been analyzed.")
-            raise AlreadyAnalyzed
+#        if self.hashes["sha256"] in ANALYZED_FILES:
+#            print(f"[!] File {self.path} has already been analyzed.")
+#            raise AlreadyAnalyzed
 
-        ANALYZED_FILES.append(self.hashes["sha256"])
+#        ANALYZED_FILES.append(self.hashes["sha256"])
+        # Checking for unwanted packers
+        self.peid = self.__yara_peid()
+        for match in self.peid:
+            if "delphi" in match.lower():
+                print("[!] Unwanted delphi packed sample!")
+                raise UnwantedPacker
 
         # creating working directory
         check_mkdir(self.working_dir)
@@ -104,12 +114,6 @@ class AnalyzeFile:
         self.path = self.working_dir + os.sep + self.hashes["md5"] + ".PE"
 
         # Populating analysis
-        self.peid = self.__yara_peid()
-        for match in self.peid:
-            if "delphi" in match.lower():
-                print("[!] Unwanted delphi packed sample!")
-                raise UnwantedPacker
-
         self.floss = FLOSSAnalysis(self.path, self.working_dir)
 
         capa_analysis = CapaAnalysis(self.path)
@@ -435,20 +439,8 @@ def check_right_pe(path: str) -> bool:
     return False
 
 
-def start_analyze(file: str) -> None:
-    check_mkdir(WORK_DIR)
-    if check_right_pe(file):
-        print(f"DBG: Analyze file {file}")
-        try:
-            new_file = AnalyzeFile(file)
-            new_file.pprint()
-        except AlreadyAnalyzed:
-            return
-        except UnwantedPacker:
-            return
-
-
 def check_mkdir(path: str) -> None:
+    path = os.path.abspath(path)
     if not os.path.isdir(path):
         os.mkdir(path)
     return
@@ -467,61 +459,116 @@ def absolute_file_path(dir_path: str) -> list:
     return flist
 
 
+def chunk_reader(fobj, chunk_size=1024):
+    """Generator that reads a file in chunks of bytes"""
+    while True:
+        chunk = fobj.read(chunk_size)
+        if not chunk:
+            return
+        yield chunk
+
+
+def get_hash(filename, hash=hashlib.sha1):
+    hashobj = hash()
+    file_obj = open(filename, "rb")
+
+    for chunk in chunk_reader(file_obj):
+        hashobj.update(chunk)
+    hashed = hashobj.digest()
+
+    file_obj.close()
+    return hashed
+
+
+# This is duplicate work, as the analysis also takes a hash, but it is for pool work
+def remove_duplicate_files(path_list: list) -> list:
+    hash_list = list()
+    unique_list = list()
+    for p in path_list:
+        sha1 = get_hash(p)
+        if sha1 not in hash_list:
+            hash_list.append(sha1)
+            unique_list.append(p)
+    return unique_list
+
+
 def bulk_analyze(dir_path: str) -> None:
     global WORK_DIR
-    # if bulk analysis, change workdir to sample dir
-    WORK_DIR = os.path.abspath(dir_path) + os.sep + WORK_DIR
     # Get absolute path for sample files
     sample_paths = absolute_file_path(dir_path)
+    # if bulk analysis, change workdir to sample dir
+    WORK_DIR = os.path.abspath(dir_path) + os.sep + WORK_DIR
+
     # create working dir
     check_mkdir(WORK_DIR)
-    for sample in sample_paths:
-        if check_right_pe(sample):
-            print("Starting analyzing: " + sample)
-            try:
-                new_file = AnalyzeFile(sample)
-                new_file.pprint()
-            except AlreadyAnalyzed:
-                continue
-            except UnwantedPacker:
-                continue
-        else:
-            print("[!] Sample not right type, no analysis on " + sample)
 
-    print("[*] Done with bulk analyzing!")
+    print("Removing duplicate files.")
+    unique_files = remove_duplicate_files(sample_paths)
+
+    # multiprocessing with pool
+    pool = multiprocessing.Pool(NUMBERS_OF_CORES_TO_USE)
+    result = pool.map(start_analysis_wrapper, unique_files)
+
+    print("Done?")
+
+
+def start_analysis_wrapper(sample: str) -> bool: # ret false nothing done, ret true done
+    if check_right_pe(sample):
+        print("Starting analyzing: " + sample)
+        try:
+            analysis = AnalyzeFile(sample)
+            analysis.pprint()
+            return True
+        except AlreadyAnalyzed:
+            return False
+        except UnwantedPacker:
+            return False
+    else:
+        print("[!] Sample is wrong type of file, no analysis on " + sample)
+        return False
 
 
 def main():
-    if len(sys.argv) == 1:
-        print("Need arguments. Print help?")
-        sys.exit(0)
-
-    desc = "Picky! Because you there are always better things to look at!"
-    epilog = "Supposed to be bulk based. Takes a file or dir."
-
+    desc = "Picky! Because there are always better things to look at!\nSupposed to be bulk based. Takes a file or dir."
+    epilog = ""
     parser = argparse.ArgumentParser(
         description=desc, epilog=epilog, formatter_class=argparse.RawDescriptionHelpFormatter
     )
 
     parser.add_argument("sample", type=str,
-                        help="Path to file or folder with samples. If folder all files will be iterated")
+                        help="Path to file or folder with samples. If folder all files will be gathered, depth=1.")
     parser.add_argument("-p", "--dbgprint", action="store_true", help="Print debugging related information.")
     parser.add_argument("-m", "--multiprocess", type=int,
                         help="How many processes to use with bulk analysis. Default is 4.")
+    #parser.add_argument("-h", "--help", action="store_true", help="Print help message and exit.")
 
-    args = parser.parse_args()
+    try:
+        args = parser.parse_args()
+    except:
+        parser.print_usage()
+        sys.exit(0)
 
     if args.dbgprint:
         logging.getLogger("picky").setLevel(logging.DEBUG)
 
-    if args.multiprocess > 0:
+    if args.multiprocess and args.multiprocess > 0:
+        global NUMBERS_OF_CORES_TO_USE
+        NUMBERS_OF_CORES_TO_USE = args.multiprocess
 
     if os.path.isdir(args.sample):
         bulk_analyze(args.sample)
         sys.exit(0)
 
     else:
-        start_analyze(args.sample)
+        #global WORK_DIR
+        # Get absolute path for sample files
+        #sample_paths = str(os.path.abspath(args.sample))
+
+        #WORK_DIR = os.path.dirname(sample_paths) + os.sep + WORK_DIR
+
+        # create working dir
+        #check_mkdir(WORK_DIR)
+        start_analysis_wrapper(args.sample)
         sys.exit(0)
 
 
