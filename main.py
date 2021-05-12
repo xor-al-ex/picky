@@ -20,7 +20,7 @@ import multiprocessing
 
 from datetime import datetime
 from shutil import copyfile
-
+from copy import deepcopy
 
 import capa.main
 import capa.rules
@@ -174,37 +174,27 @@ class CapaAnalysis:
         extractor = capa.main.get_extractor(self.path, "auto", "", "",  disable_progress=True)
         capabilities, counts = capa.main.find_capabilities(RULES, extractor, disable_progress=True)
 
-        #meta = capa.main.collect_metadata("", self.path, RULES_PATH, "auto", extractor)
-        #meta["analysis"].update(counts)
-
-        #doc = render_verbose(meta, RULES, capabilities)
-        #doc = convert_capabilities_to_result_document(meta, RULES, capabilities)
         doc = convert_capabilities_to_result_document("", RULES, capabilities)
-        capa_json = json.loads(capa.render.render_json("", RULES, capabilities))
 
-        rule_hit_loc = dict()
+        #rule_hit_loc = dict()
         for rule_name, rule_dict in doc["rules"].items():
-            rule_hit_loc[rule_name] = dict()
+            #rule_hit_loc[rule_name] = dict()
             for match in rule_dict["matches"].values():
                 temp = self.__recursive_get_lowest_child_location(match)
-                if type(temp) == list:
-                    for m in temp:
-                        for hit, locs in m.items():
-                            tmp_loc_list = rule_hit_loc[rule_name].get(hit, list())
-                            rule_hit_loc[rule_name].update({hit: tmp_loc_list + locs})
-                else:
-                    rule_hit_loc.update({rule_name: temp})
-            #self.__extract_capa_rule_location(rule_name, rule_dict)
-            # not in use
-            # if tmp_dict and tmp_dict.values():
-            #     old_dict = self.capa_dict.get(rule_dict, {})
-            #     new_dict = old_dict + tmp_dict
-            #     self.capa_dict.update({rule_name: new_dict})
+                for m in temp:
+                    for hit, locs in m.items():
+                        if rule_name in self.capa_dict.keys():
+                            tmp_loc_list = self.capa_dict[rule_name].get(hit, list())
+                            self.capa_dict.update({hit: tmp_loc_list + locs})
+                        else:
+                            self.capa_dict[rule_name] = {hit: locs}
+                        #tmp_loc_list = rule_hit_loc[rule_name].get(hit, list())
+                        #rule_hit_loc[rule_name].update({hit: tmp_loc_list + locs})
 
-    def __recursive_get_lowest_child_location(self, entry: dict):
+    def __recursive_get_lowest_child_location(self, entry: dict) -> list:
         # if success is false, then leave
         if not entry["success"]:
-            return {}
+            return [{}]
 
         # if has success and no more children, then we are lowest
         if entry["success"] and entry["children"] == []:
@@ -215,31 +205,42 @@ class CapaAnalysis:
                     dict_key = entry["node"]["feature"]["api"]
                 elif "characteristic" in entry["node"]["feature"]:
                     want_list = ["indirect call", "nzxor"]
+                    ignore_list = ["loop", "tight loop", "recursive call"] # more for debug more that anything
                     if entry["node"]["feature"]["characteristic"] in want_list:
                         dict_key = entry["node"]["feature"]["characteristic"]
+                    elif entry["node"]["feature"]["characteristic"] in ignore_list:
+                        return [{}]
                     else:
-                        print("is missed?")
-                        return {}
+                        print("unseen charac or something")
+                        return [{}]
+                elif "regex" in entry["node"]["feature"]:
+                    dict_key = entry["node"]["feature"]["match"]
                 else:
+                    # type number, mnemonic, section
                     print("Which feature?")
                     dict_key = "??"
+                    return [{}]
             else:
                 print("No feature???")
                 dict_key = "no feature"
+                return [{}]
             locs = [hex(loc) for loc in entry["locations"]]
 
-            # returns a small dict with found item at locations
-            return {dict_key: locs}
+            # returns a small list with dict with found item at locations. Ret list for ease of handling
+            return [{dict_key: locs}]
 
         else:
-            # gives nested list: make temp dir and update like above?
+            # gives nested list. check and unnest
             children_matches = list()
             for child in entry["children"]:
                 tmp = self.__recursive_get_lowest_child_location(child)
                 if tmp:
                     children_matches.append(tmp)
-            return children_matches
 
+            unnest = list()
+            for el in flatten_list(children_matches):
+                unnest.append(el)
+            return unnest
 
     def __extract_capa_rule_location(self, rule_name: str, rule_dict: dict) -> None:
         # hex_locations = list()
@@ -581,6 +582,18 @@ def start_analysis_wrapper(sample: str) -> bool: # ret false nothing done, ret t
     else:
         print("[!] Sample is wrong type of file, no analysis on " + sample)
         return False
+
+
+# Makes an arbitrarily nested list flat
+def flatten_list(nested_list: list):
+    nested_list = deepcopy(nested_list)
+    while nested_list:
+        sublist = nested_list.pop(0)
+
+        if isinstance(sublist, list):
+            nested_list = sublist + nested_list
+        else:
+            yield sublist
 
 
 def main():
