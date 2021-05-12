@@ -194,6 +194,7 @@ class CapaAnalysis:
         if not entry["success"]:
             return [{}]
 
+        dict_key = ""   # for syntax highlight
         # if has success and no more children, then we are lowest
         if entry["success"] and entry["children"] == []:
             # trying to extract API call
@@ -230,11 +231,10 @@ class CapaAnalysis:
                         if "api" in entry["node"]["statement"]["child"]:
                             dict_key = entry["node"]["statement"]["child"]["api"]
                 else:
-                    print("Are statement useful?")
+                    # unhandle statement
                     return [{}]
             else:
-                print("No feature???")
-                dict_key = "no feature"
+                # no feature
                 return [{}]
             locs = [hex(loc) for loc in entry["locations"]]
 
