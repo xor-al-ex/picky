@@ -202,7 +202,7 @@ class CapaAnalysis:
                 if "api" in entry["node"]["feature"]:
                     dict_key = entry["node"]["feature"]["api"]
                 elif "characteristic" in entry["node"]["feature"]:
-                    want_list = ["indirect call", "nzxor"]
+                    want_list = ["indirect call", "nzxor", "peb access", "stack string"]
                     ignore_list = ["loop", "tight loop", "recursive call"] # more for debug more that anything
                     if entry["node"]["feature"]["characteristic"] in want_list:
                         dict_key = entry["node"]["feature"]["characteristic"]
@@ -213,10 +213,24 @@ class CapaAnalysis:
                         return [{}]
                 elif "regex" in entry["node"]["feature"]:
                     dict_key = entry["node"]["feature"]["match"]
+                elif "mnemonic" in entry["node"]["feature"]:
+                    want_inst = ["sidt", "sgdt", "sldt", "smsw", "str", "in", "vpcext", "int", "aesenc", "aesdec"]
+                    if entry["node"]["feature"]["mnemonic"] in want_inst:
+                        dict_key = entry["node"]["feature"]["mnemonic"]
+                    else:
+                        return [{}]
                 else:
-                    # type number, mnemonic, section
+                    # type number, section, bytes??, offset, offset/x32
                     print("Which feature?")
                     dict_key = "??"
+                    return [{}]
+            elif "statement" in entry["node"]: # range
+                if "range" in entry["node"]["statement"]:
+                    if "child" in entry["node"]["statement"]:
+                        if "api" in entry["node"]["statement"]["child"]:
+                            dict_key = entry["node"]["statement"]["child"]["api"]
+                else:
+                    print("Are statement useful?")
                     return [{}]
             else:
                 print("No feature???")
@@ -239,58 +253,6 @@ class CapaAnalysis:
             for el in flatten_list(children_matches):
                 unnest.append(el)
             return unnest
-
-    def __extract_capa_rule_location(self, rule_name: str, rule_dict: dict) -> None:
-        # hex_locations = list()
-        for location, data_dict in rule_dict["matches"].items():
-            location = hex(location)
-            #self.capa_dict.update({location: dict()})
-            #if not data_dict["children"]:
-                #print("No children?")
-
-            children_superdict = self.__get_child_data(data_dict["children"])
-            tmp_dict = self.capa_dict.get(rule_name, dict())
-            tmp_dict.update({location: children_superdict})
-            self.capa_dict.update({rule_name: tmp_dict})
-
-    def __get_child_data(self, children: dict) -> dict:
-        children_dict = dict()
-        for child in children:
-            if child["children"]:
-                children_dict.update(self.__get_child_data(child["children"]))
-            if child["success"]:
-                inner_name = ""
-                # So many nested dicts and different keys. Just go with it.
-                if "feature" in child["node"]:
-                    if "api" in child["node"]["feature"]:
-                        inner_name = child["node"]["feature"]["api"]
-                    elif "characteristic" in child["node"]["feature"]:
-                        inner_name = child["node"]["feature"]["characteristic"]
-                    elif "match" in child["node"]["feature"]:
-                        inner_name = child["node"]["feature"]["match"]
-                    elif "type" in child["node"]["feature"]:
-                        if "offset" in child["node"]["feature"]["type"]:
-                            if hasattr(child["node"]["feature"], "description"):
-                                inner_name = f"{child['node']['feature'][child['node']['feature']['type']]}_{child['node']['feature']['description']}"
-                elif "type" in child["node"]:
-                    if child["node"]["type"] == "statement":
-                        inner_name = "+".join(children_dict.keys())
-                    else:
-                        continue
-                else:
-                    print("CHECK!")
-                    continue
-
-                if inner_name:
-                    if "locations" in child:
-                        sub_locations = [hex(loc) for loc in child["locations"]]
-                    else:
-                        sub_locations = "no outer location"
-                    children_dict.update({inner_name: sub_locations})
-                else:
-                    # print("Nothing to add")
-                    continue
-        return children_dict
 
 
 class FLOSSAnalysis:
