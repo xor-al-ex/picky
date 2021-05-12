@@ -178,18 +178,16 @@ class CapaAnalysis:
 
         #rule_hit_loc = dict()
         for rule_name, rule_dict in doc["rules"].items():
-            #rule_hit_loc[rule_name] = dict()
+            self.capa_dict[rule_name] = dict()
             for match in rule_dict["matches"].values():
                 temp = self.__recursive_get_lowest_child_location(match)
                 for m in temp:
                     for hit, locs in m.items():
-                        if rule_name in self.capa_dict.keys():
-                            tmp_loc_list = self.capa_dict[rule_name].get(hit, list())
-                            self.capa_dict.update({hit: tmp_loc_list + locs})
-                        else:
-                            self.capa_dict[rule_name] = {hit: locs}
-                        #tmp_loc_list = rule_hit_loc[rule_name].get(hit, list())
-                        #rule_hit_loc[rule_name].update({hit: tmp_loc_list + locs})
+                        tmp_loc_list = self.capa_dict[rule_name].get(hit, list())
+                        self.capa_dict[rule_name].update({hit: tmp_loc_list + locs})
+            # if there arent anything populated, delete the entry
+            if not self.capa_dict[rule_name]:
+                del self.capa_dict[rule_name]
 
     def __recursive_get_lowest_child_location(self, entry: dict) -> list:
         # if success is false, then leave
