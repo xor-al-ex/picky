@@ -21,6 +21,7 @@ import multiprocessing
 from datetime import datetime
 from shutil import copyfile
 from copy import deepcopy
+from pathlib import Path
 
 import capa.main
 import capa.rules
@@ -149,18 +150,6 @@ class AnalyzeFile:
         self.hashes["sha256"] = sha256.hexdigest()
 
     def pprint(self):
-#        print(f"""Filename: {self.filename}
-#Hashes:
-#  md5: {self.hashes["md5"]}
-#  sha1: {self.hashes["sha1"]}
-#  sha256: {self.hashes["sha256"]}
-#PEid: {", ".join(self.peid)}""")
-#        print("Interesting Strings:\n  Static:\n    " + "\n    ".join(self.floss.interesting_strings["static"]))
-#        print("  Decoded:\n    " + "\n    ".join(self.floss.interesting_strings["decoded"]))
-#        print("  Stack:\n    " + "\n    ".join(self.floss.interesting_strings["stack"]))
-#        print("Interesting Imports:")
-#        print("  " + "\n  ".join(self.pedata.interesting_imports))
-#        print("Done")
         print(self.create_report())
         print("Done!")
 
@@ -222,7 +211,7 @@ class AnalyzeFile:
         final_report += "\n\n"
 
         # import and export
-        final_report += "Staticlly imported functions:\n  " + ' \n  '.join(self.pedata.import_list) + '\n'
+        final_report += "Statically imported functions:\n  " + ' \n  '.join(self.pedata.import_list) + '\n'
         final_report += f"Statically exported functions:\n  " + '\n  '.join(self.pedata.export_list) + '\n'
 
         return final_report
@@ -683,6 +672,38 @@ def remove_duplicate_files(path_list: list) -> list:
     return unique_list
 
 
+def create_meta_report(path_to_base_working_dir: str) -> None:
+    meta_report = "Meta report for Picky's bulk analysis.\n" \
+                  "This report only has file path and tags associated with it. Please read extensive report and\n" \
+                  "verify the findings for yourself!\n\n"
+
+    for path in Path(path_to_base_working_dir).rglob("PickyReport*"):
+        meta_dict = dict()
+        report_file = open(path, "r")
+        while True:
+            line = report_file.readline()
+            if line.startswith("Path to file"):
+                # ( ´･･)ﾉ(._.`)
+                meta_dict["Path:"] = line.split("Path to file: ")[-1]
+            elif line.startswith("Tags:"):
+                meta_dict["Tags:"] = line.split("Tags: ")[-1]
+            elif line.startswith("Tags (subset from capa): "):
+                meta_dict["Tags (subset from capa):"] = line.split("Tags: (subset from capa): ")[-1]
+
+            if len(meta_dict.keys()) == 3:
+                break
+
+        report_file.close()
+        for key, value in meta_dict.items():
+            meta_report += f"{key}: {value}"
+        meta_report += "\n"
+
+    with open(f"{path_to_base_working_dir}{os.sep}PickyMetaReport.txt", "w") as fp:
+        fp.write(meta_report)
+
+    return
+
+
 def bulk_analyze(dir_path: str) -> None:
     global WORK_DIR
     # Get absolute path for sample files
@@ -700,6 +721,7 @@ def bulk_analyze(dir_path: str) -> None:
     pool = multiprocessing.Pool(NUMBERS_OF_CORES_TO_USE)
     result = pool.map(start_analysis_wrapper, unique_files)
 
+    create_meta_report(WORK_DIR)
     print("Done?")
 
 
@@ -708,7 +730,7 @@ def start_analysis_wrapper(sample: str) -> bool: # ret false nothing done, ret t
         print("Starting analyzing: " + sample)
         try:
             analysis = AnalyzeFile(sample)
-            analysis.pprint()
+            analysis.write_report()
             return True
         except AlreadyAnalyzed:
             return False
