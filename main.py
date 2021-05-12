@@ -92,14 +92,12 @@ class AnalyzeFile:
 
         # use hashes md5 to create unique folder and file name
         self.__calculate_hashes()
-        self.working_dir = os.path.dirname(self.path) + os.sep + WORK_DIR + os.sep + self.hashes["md5"]
+        # So there is some fuckup when doing single and multiprocess, checking for abs path
+        if WORK_DIR[1] == ":":
+            self.working_dir = WORK_DIR + os.sep + self.hashes["md5"]
+        else:
+            self.working_dir = os.path.dirname(self.path) + os.sep + WORK_DIR + os.sep + self.hashes["md5"]
 
-        # add file to global list or abort analysis
-#        if self.hashes["sha256"] in ANALYZED_FILES:
-#            print(f"[!] File {self.path} has already been analyzed.")
-#            raise AlreadyAnalyzed
-
-#        ANALYZED_FILES.append(self.hashes["sha256"])
         # Checking for unwanted packers
         self.peid = self.__yara_peid()
         for match in self.peid:
@@ -149,19 +147,56 @@ class AnalyzeFile:
         self.hashes["sha256"] = sha256.hexdigest()
 
     def pprint(self):
-        print(f"""Filename: {self.filename}
-Hashes:
-  md5: {self.hashes["md5"]}
-  sha1: {self.hashes["sha1"]}
-  sha256: {self.hashes["sha256"]}
-PEid: {", ".join(self.peid)}""")
-        print("Interesting Strings:\n  Static:\n    " + "\n    ".join(self.floss.interesting_strings["static"]))
-        print("  Decoded:\n    " + "\n    ".join(self.floss.interesting_strings["decoded"]))
-        print("  Stack:\n    " + "\n    ".join(self.floss.interesting_strings["stack"]))
-        print("Interesting Imports:")
-        print("  " + "\n  ".join(self.pedata.interesting_imports))
-        print("Done")
+#        print(f"""Filename: {self.filename}
+#Hashes:
+#  md5: {self.hashes["md5"]}
+#  sha1: {self.hashes["sha1"]}
+#  sha256: {self.hashes["sha256"]}
+#PEid: {", ".join(self.peid)}""")
+#        print("Interesting Strings:\n  Static:\n    " + "\n    ".join(self.floss.interesting_strings["static"]))
+#        print("  Decoded:\n    " + "\n    ".join(self.floss.interesting_strings["decoded"]))
+#        print("  Stack:\n    " + "\n    ".join(self.floss.interesting_strings["stack"]))
+#        print("Interesting Imports:")
+#        print("  " + "\n  ".join(self.pedata.interesting_imports))
+#        print("Done")
+        attrs = vars(self)
+        print(', '.join("%s: %s" % item for item in attrs.items()))
 
+    def write_report(self):
+        final_report = f"Filname: {self.filename}\n" \
+                       f"Path to file: {self.path}\n" \
+                       f"Hashes:\n" \
+                       f"  MD5:\t\t{self.hashes['md5']}\n" \
+                       f"  SHA1:\t\t{self.hashes['sha1']}\n" \
+                       f"  SHA256:\t\t{self.hashes['sha256']}\n\n" \
+                       f"Tags: HERE BE TAGS\n\n" \
+                       f"PE Metadata analysis:\n" \
+                       f"  Is 32-bit: {'Yes' if self.pedata.is32bit else 'No'}\t" \
+                       f"Is dll: {'Yes' if self.pedata.isdll else 'No'}\t" \
+                       f"Is probably packed: {'Yes' if self.pedata.probably_packed else 'No'}\n" \
+                       f"  Sections:\n"
+        # Analyzing section data
+        something_unusual = False
+        for sect_name, analysis in self.pedata.section_analysis.items():
+            if analysis["unusual_name"]:
+                ana_text = "Unusual section name -> "
+            elif analysis["unusual_permissions"]:
+                ana_text = "Unusual permissions -> "
+            elif analysis["raw_virtual_size_diff"]:
+                ana_text = "Unusual large difference in raw and virtual size -> "
+            else:
+                continue
+
+            something_unusual = True
+            ana_text += f"Section name: {sect_name} - " \
+                                      f"Permissions: {', '.join(analysis['permissions'])} - " \
+                                      f"Large raw and virtual size diff: " \
+                                      f"{'Yes' if analysis['raw_virtual_size_diff'] else 'No'} - " \
+                                      f"Section entropy: {analysis['entropy']}"
+            final_report += f"    {ana_text}"
+        if not something_unusual:
+            ana_text = "NTB with sections."
+            final_report += f"    {ana_text}"
 
 class CapaAnalysis:
     def __init__(self, path):
@@ -222,8 +257,6 @@ class CapaAnalysis:
                         return [{}]
                 else:
                     # type number, section, bytes??, offset, offset/x32
-                    print("Which feature?")
-                    dict_key = "??"
                     return [{}]
             elif "statement" in entry["node"]: # range
                 if "range" in entry["node"]["statement"]:
@@ -397,7 +430,7 @@ class PEDataAnalysis:
             ".pdata": [section_flags_name["read"]],
             ".bss": [section_flags_name["read"]],
             ".rsrc": [section_flags_name["read"]],
-            "reloc": [section_flags_name["read"]]
+            ".reloc": [section_flags_name["read"]]
         }
         for sect in self.pedata.sections:
             unusual_name = False
@@ -588,14 +621,14 @@ def main():
         sys.exit(0)
 
     else:
-        #global WORK_DIR
+        global WORK_DIR
         # Get absolute path for sample files
-        #sample_paths = str(os.path.abspath(args.sample))
+        sample_paths = str(os.path.abspath(args.sample))
 
-        #WORK_DIR = os.path.dirname(sample_paths) + os.sep + WORK_DIR
+        WORK_DIR = os.path.dirname(sample_paths) + os.sep + WORK_DIR
 
         # create working dir
-        #check_mkdir(WORK_DIR)
+        check_mkdir(WORK_DIR)
         start_analysis_wrapper(args.sample)
         sys.exit(0)
 
