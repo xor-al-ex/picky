@@ -1,0 +1,3 @@
+[submodule "capa-rules"]
+	path = files/capa-rules
+	url = https://github.com/fireeye/capa-rules.git

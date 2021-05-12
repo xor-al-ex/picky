@@ -89,6 +89,8 @@ class AnalyzeFile:
         self.capa_dict = dict()
         self.floss = dict()
         self.pedata = ""
+        self.tags_list = list()
+        self.capa_tags = dict()
 
         # use hashes md5 to create unique folder and file name
         self.__calculate_hashes()
@@ -159,21 +161,25 @@ class AnalyzeFile:
 #        print("Interesting Imports:")
 #        print("  " + "\n  ".join(self.pedata.interesting_imports))
 #        print("Done")
-        attrs = vars(self)
-        print(', '.join("%s: %s" % item for item in attrs.items()))
+        print(self.create_report())
+        print("Done!")
 
-    def write_report(self):
+    def create_report(self) -> str:
+        self.__generate_tags()
         final_report = f"Filname: {self.filename}\n" \
                        f"Path to file: {self.path}\n" \
                        f"Hashes:\n" \
                        f"  MD5:\t\t{self.hashes['md5']}\n" \
                        f"  SHA1:\t\t{self.hashes['sha1']}\n" \
-                       f"  SHA256:\t\t{self.hashes['sha256']}\n\n" \
-                       f"Tags: HERE BE TAGS\n\n" \
+                       f"  SHA256:\t{self.hashes['sha256']}\n\n" \
+                       f"Tags: {', '.join(self.tags_list)}\n" \
+                       f"Tags (subset from capa): {', '.join(self.capa_tags)}\n\n" \
+                       f"PeID: {', '.join(self.peid) if self.peid else 'No signature hits'}\n" \
                        f"PE Metadata analysis:\n" \
-                       f"  Is 32-bit: {'Yes' if self.pedata.is32bit else 'No'}\t" \
-                       f"Is dll: {'Yes' if self.pedata.isdll else 'No'}\t" \
-                       f"Is probably packed: {'Yes' if self.pedata.probably_packed else 'No'}\n" \
+                       f"  Is 32-bit: {'Yes' if self.pedata.is32bit else 'No'}\t\t\t" \
+                       f"Is dll: {'Yes' if self.pedata.isdll else 'No'}\n" \
+                       f"  Is probably packed: {'Yes' if self.pedata.probably_packed else 'No'}\t" \
+                       f"Has TLS section: {'Yes' if self.pedata.tls else 'No'}\n" \
                        f"  Sections:\n"
         # Analyzing section data
         something_unusual = False
@@ -189,14 +195,150 @@ class AnalyzeFile:
 
             something_unusual = True
             ana_text += f"Section name: {sect_name} - " \
-                                      f"Permissions: {', '.join(analysis['permissions'])} - " \
-                                      f"Large raw and virtual size diff: " \
-                                      f"{'Yes' if analysis['raw_virtual_size_diff'] else 'No'} - " \
-                                      f"Section entropy: {analysis['entropy']}"
+                        f"Permissions: {', '.join(analysis['permissions'])} - " \
+                        f"Large raw and virtual size diff: " \
+                        f"{'Yes' if analysis['raw_virtual_size_diff'] else 'No'} - " \
+                        f"Section entropy: {analysis['entropy']:.3f}\n"
             final_report += f"    {ana_text}"
         if not something_unusual:
             ana_text = "NTB with sections."
             final_report += f"    {ana_text}"
+
+        # getting interesting functions
+        final_report += "\n\nPotentially interesting imports from IAT:\n  " + '\n  '.join(self.pedata.interesting_imports) + '\n'
+
+        final_report += "\n\nPotentially interesting strings:\n  "
+        final_report += "Static:\n    " + '\n    '.join(self.floss.interesting_strings["static"])
+        final_report += "\n  Decoded:\n    " + '\n    '.join(self.floss.interesting_strings["decoded"])
+        final_report += "\n  Stack Strings:\n    " + '\n    '.join(self.floss.interesting_strings["stack"])
+        final_report += "\n\n"
+
+        final_report += "Capa analysis findings:\n"
+        final_report += json.dumps(self.capa_dict, indent=4, sort_keys=True)
+        final_report += "\n\n"
+
+        final_report += "All strings:\n"
+        final_report += json.dumps(self.floss.json["strings"], indent=4, sort_keys=True)
+        final_report += "\n\n"
+
+        # import and export
+        final_report += "Staticlly imported functions:\n  " + ' \n  '.join(self.pedata.import_list) + '\n'
+        final_report += f"Statically exported functions:\n  " + '\n  '.join(self.pedata.export_list) + '\n'
+
+        return final_report
+
+    def __generate_tags(self) -> None:
+        tags = {
+            "exe": False,
+            "dll": False,
+            "tls": False,
+            "exports": False,
+            "exe_with_exports": False,
+            "few_imports": False,
+            "packed": False,
+            "unusual_section_name": False,
+            "unusual_section_permissions": False,
+            "raw_virtual_size_diff": False,
+            "interesting_stack_strings": False,
+            "stack_strings": False,
+            "interesting_decoded_string": False,
+            "decoded_strings": False,
+            "decoded_function_names": False,
+            "interesting_static_strings": False,
+            "network": False,
+            "keylogger": False,
+            "ransomware": False,
+            "anti_vm": False,
+            "anti_disasm": False,
+            "anti_debugging": False,
+            "anti_analysis_tools": False,
+            "anti_av": False,
+            "indirect_call": False,
+            "registry": False
+        }
+        if self.pedata.isdll:
+            tags["dll"] = True
+        else:
+            tags["exe"] = True
+
+        tags["tls"] = self.pedata.tls
+        tags["exports"] = len(self.pedata.export_list) > 0
+        tags["exe_with_exports"] = True if tags["exe"] and tags["exports"] else False
+        tags["few_imports"] = True if len(self.pedata.import_list) <= 15 else False
+        tags["packed"] = self.pedata.probably_packed
+        for section in self.pedata.section_analysis.values():
+            if section["unusual_name"]:
+                tags["unusual_section_name"] = True
+            if section["unusual_permissions"]:
+                tags["unusual_section_permissions"] = True
+            if section["raw_virtual_size_diff"]:
+                tags["raw_virtual_size_diff"] = True
+        tags["stack_strings"] = True if len(self.floss.json["strings"]["stack_strings"]) > 0 else False
+        tags["interesting_stack_strings"] = True if len(self.floss.interesting_strings["stack"]) > 0 else False
+        tags["decoded_strings"] = True if len(self.floss.json["strings"]["decoded_strings"]) > 0 else False
+        tags["interesting_decoded_string"] = True if len(self.floss.interesting_strings["decoded"]) > 0 else False
+        tags["interesting_static_strings"] = True if len(self.floss.interesting_strings["static"]) > 0 else False
+        tags["decoded_function_names"] = self.floss.decoded_function_names
+
+        capa_rule_name_tagging = {
+            "anti_debugging": ["debug", "ntglobalfalg", "breakpoint", "heap flags", "heap force flags"],
+            "anti_av": ["sandbox"],
+            "anti_disasm": ["heavens", "anti-disasm"],
+            "anti_vm": ["anti-vm", "memory capacity"],
+            "anti_analysis_tools": ["analysis tools"],
+            "stack_strings": ["stackstrings"],
+            "packed": ["packed"],
+            "shell": ["shell"],
+            "execute": ["execute"],
+            "keylogger": ["keystroke", "clipboard"],
+            "network": ["recieve", "wininet", "winhttp", "http", "url", "internet", "sock", "tcp", "udp", "dns",
+                        "domain information", "network"],
+            "xor": ["xor"],
+            "base64": ["base64"],
+            "rc4": ["rc4"],
+            "aes": [" aes "],
+            "des": [" des "],
+            "rsa": [" rsa "],
+            "embeded_pe": ["embedded pe"],
+            "ransomware": ["enumerate files", "enumerate disk volumes"],
+            "firewall": ["firewall"],
+            "desktop_lock": ["lock the desktop"],
+            "change_wallpaper": ["wallpaper"],
+            "cpu_info": ["cpu information", "number of processors"],
+            "mutex": ["mutex"],
+            "create_process_suspended": ["process suspended"],
+            "rwx_memory": ["rwx memory"],
+            "registry": ["registry"],
+            "start_service": ["create service", "run as service", "start service"],
+            "create_thread_suspended": ["suspend thread"],
+            "create_process": ["create process"],
+            "destructive": ["delete volume", "overwrite master boot"],
+            "pusha_popa": ["pusha popa"],
+            "peb": ["peb "],
+            "dynamic_resolved_functions": ["link function at runtime"],
+            "persistence": ["persist", "scheduled"]
+        }
+
+        for rule_name in self.capa_dict.keys():
+            for tag, match_list in capa_rule_name_tagging.items():
+                for match in match_list:
+                    if match in rule_name.lower():
+                        if rule_name in self.capa_tags.keys():
+                            self.capa_tags[rule_name].append(tag)
+                        else:
+                            self.capa_tags[rule_name] = [match]
+                        # updateing normal tag dict
+                        if tag in tags.keys():
+                            tags[tag] = True
+
+        for tag, value in tags.items():
+            if value:
+                self.tags_list.append(tag)
+
+    def write_report(self):
+        with open(f"{self.working_dir}{os.sep}PickyReport_{os.path.basename(self.path)}.txt", "w") as fp:
+            fp.write(self.create_report())
+
 
 class CapaAnalysis:
     def __init__(self, path):
@@ -389,7 +531,7 @@ class PEDataAnalysis:
                 else:
                     self.import_list.append("No imports?")
             except KeyError:
-                self.import_list.append("KeyError - No imports?")
+                self.import_list = []
 
             try:
                 self.pedata.parse_data_directories(directories=[pefile.DIRECTORY_ENTRY['IMAGE_DIRECTORY_ENTRY_EXPORTS']])
@@ -403,7 +545,7 @@ class PEDataAnalysis:
                             exptab.name = f"{exptab.name} - Ordinal: {str(exptab.ordinal)}"
                             self.export_list.append(exptab.name)
             except KeyError:
-                self.export_list.append("KeyError - No exports?")
+                self.export_list = []
 
     def __import_analysis(self):
         for imp in self.import_list:
@@ -456,8 +598,8 @@ class PEDataAnalysis:
                         if getattr(sect, value):
                             permissions.append(perm)
 
-            # check if virtual size is larger than 150% of raw size -> packed?
-            sect_size_diff = True if sect.Misc_VirtualSize > sect.SizeOfRawData * 1.5 else False
+            # check if virtual size is larger than 170% of raw size -> packed?
+            sect_size_diff = True if sect.Misc_VirtualSize > sect.SizeOfRawData * 1.7 else False
 
             sect_analysis = {
                 "unusual_name": unusual_name,
