@@ -1,6 +1,3 @@
-# TODO: Handle files with same name -> hash based name dir and file?
-import queue
-
 import magic
 import yara
 import os.path
@@ -15,13 +12,12 @@ import os
 import re
 import pefile
 import peutils
-import time
 import multiprocessing
 
-from datetime import datetime
 from shutil import copyfile
 from copy import deepcopy
 from pathlib import Path
+from datetime import datetime
 
 import capa.main
 import capa.rules
@@ -105,7 +101,10 @@ class AnalyzeFile:
         self.peid = self.__yara_peid()
         for match in self.peid:
             if "delphi" in match.lower():
-                print("[!] Unwanted delphi packed sample!")
+                tsprint("[!] Unwanted delphi packed sample!")
+                raise UnwantedPacker
+            if "visual_basic" in match.lower():
+                tsprint("[!] Unwanted Visual Basic sample!")
                 raise UnwantedPacker
 
         # creating working directory
@@ -163,7 +162,7 @@ class AnalyzeFile:
                        f"  SHA256:\t{self.hashes['sha256']}\n\n" \
                        f"Tags: {', '.join(self.tags_list)}\n" \
                        f"Tags (subset from capa): {', '.join(self.capa_tags)}\n\n" \
-                       f"PeID: {', '.join(self.peid) if self.peid else 'No signature hits'}\n" \
+                       f"PeID: {', '.join(self.peid) if self.peid else 'No signature hits'}\n\n" \
                        f"PE Metadata analysis:\n" \
                        f"  Is 32-bit: {'Yes' if self.pedata.is32bit else 'No'}\t\t\t" \
                        f"Is dll: {'Yes' if self.pedata.isdll else 'No'}\n" \
@@ -369,14 +368,14 @@ class CapaAnalysis:
                 if "api" in entry["node"]["feature"]:
                     dict_key = entry["node"]["feature"]["api"]
                 elif "characteristic" in entry["node"]["feature"]:
-                    want_list = ["indirect call", "nzxor", "peb access", "stack string"]
-                    ignore_list = ["loop", "tight loop", "recursive call"] # more for debug more that anything
+                    want_list = ["indirect call", "nzxor", "peb access", "stack string", "fs access"]
+                    ignore_list = ["loop", "tight loop", "recursive call", "cross section flow"] # more for debug more that anything
                     if entry["node"]["feature"]["characteristic"] in want_list:
                         dict_key = entry["node"]["feature"]["characteristic"]
                     elif entry["node"]["feature"]["characteristic"] in ignore_list:
                         return [{}]
                     else:
-                        print("unseen charac or something")
+                        tsprint("unseen charac or something: " + str(entry["node"]["feature"]["characteristic"]))
                         return [{}]
                 elif "regex" in entry["node"]["feature"]:
                     dict_key = entry["node"]["feature"]["match"]
@@ -505,34 +504,37 @@ class PEDataAnalysis:
     def __get_imports_exports(self):
         if self.pedata.OPTIONAL_HEADER.DATA_DIRECTORY[pefile.DIRECTORY_ENTRY['IMAGE_DIRECTORY_ENTRY_IMPORT']].VirtualAddress != 0:
             try:
-                self.pedata.parse_data_directories(directories=[pefile.DIRECTORY_ENTRY['IMAGE_DIRECTORY_ENTRY_IMPORT']])
+                self.pedata.parse_data_directories()
                 if self.pedata.DIRECTORY_ENTRY_IMPORT is not None:
                     for entry in self.pedata.DIRECTORY_ENTRY_IMPORT:
                         for imptab in entry.imports:
                             if imptab.name is None:
                                 if imptab.ordinal is None:
-                                    imptab.name = "None"
+                                    imp_func = "None"
                                 else:
-                                    imptab.name = "Ordinal: " + str(imptab.ordinal)
+                                    imp_func = "Ordinal: " + str(imptab.ordinal)
                             # decode name if bytes
-                            imp_func = imptab.name.decode() if type(imptab.name) == bytes else imptab.name
+                            else:
+                                imp_func = imptab.name.decode() if type(imptab.name) == bytes else imptab.name
                             self.import_list.append(imp_func)
                 else:
                     self.import_list.append("No imports?")
             except KeyError:
                 self.import_list = []
+            except AttributeError:
+                # PE object has no attribute DIRECTORY_ENTRY_IMPORT? (╯°□°）╯︵ ┻━┻
+                self.import_list = []
 
             try:
-                self.pedata.parse_data_directories(directories=[pefile.DIRECTORY_ENTRY['IMAGE_DIRECTORY_ENTRY_EXPORTS']])
                 if self.pedata.DIRECTORY_ENTRY_EXPORT is not None:
                     for entry in self.pedata.DIRECTORY_ENTRY_EXPORT.symbols:
-                        for exptab in entry:
-                            if exptab.name is None:
-                                if imptab.ordinal is None:
-                                    exptab.name = "No name no ordinal"
-                                exptab.name = "Ordinal: " + str(exptab.ordinal)
-                            exptab.name = f"{exptab.name} - Ordinal: {str(exptab.ordinal)}"
-                            self.export_list.append(exptab.name)
+                        if entry.name is None:
+                            if entry.ordinal is None:
+                                exp_name = "No name no ordinal"
+                            exp_name = "Ordinal: " + str(entry.ordinal)
+                        else:
+                            exp_name = f"{entry.name.decode() if type(entry.name) == bytes else entry.name} - Ordinal: {str(entry.ordinal)}"
+                        self.export_list.append(exp_name)
             except KeyError:
                 self.export_list = []
 
@@ -568,7 +570,10 @@ class PEDataAnalysis:
             unusual_permissions = False
             permissions = list()
             # (•_•)
-            sect_name = sect.Name.decode().split("\x00", 1)[0]
+            try:
+                sect_name = sect.Name.decode().split("\x00", 1)[0]
+            except UnicodeDecodeError:
+                sect_name = "UnicodeDecodeError -> Manually check name."
             # if section name is unusual we want to know permissions
             if sect_name not in usual_sections_characteristic.keys():
                 unusual_name = True
@@ -672,7 +677,7 @@ def remove_duplicate_files(path_list: list) -> list:
     return unique_list
 
 
-def create_meta_report(path_to_base_working_dir: str) -> None:
+def create_meta_report(path_to_base_working_dir: str) -> str: # path to final meta report
     meta_report = "Meta report for Picky's bulk analysis.\n" \
                   "This report only has file path and tags associated with it. Please read extensive report and\n" \
                   "verify the findings for yourself!\n\n"
@@ -684,24 +689,28 @@ def create_meta_report(path_to_base_working_dir: str) -> None:
             line = report_file.readline()
             if line.startswith("Path to file"):
                 # ( ´･･)ﾉ(._.`)
-                meta_dict["Path:"] = line.split("Path to file: ")[-1]
+                meta_dict["Path:"] = line
             elif line.startswith("Tags:"):
-                meta_dict["Tags:"] = line.split("Tags: ")[-1]
+                meta_dict["Tags:"] = line
             elif line.startswith("Tags (subset from capa): "):
-                meta_dict["Tags (subset from capa):"] = line.split("Tags: (subset from capa): ")[-1]
+                meta_dict["Tags (subset from capa):"] = line
+            elif line.startswith("PeID: "):
+                meta_dict["PeID:"] = line
 
-            if len(meta_dict.keys()) == 3:
+            if len(meta_dict.keys()) == 4:
                 break
 
         report_file.close()
         for key, value in meta_dict.items():
-            meta_report += f"{key}: {value}"
+            #meta_report += f"{key}: {value}"
+            meta_report += value
         meta_report += "\n"
 
-    with open(f"{path_to_base_working_dir}{os.sep}PickyMetaReport.txt", "w") as fp:
+    report_path = f"{path_to_base_working_dir}{os.sep}PickyMetaReport.txt"
+    with open(report_path, "w") as fp:
         fp.write(meta_report)
 
-    return
+    return report_path
 
 
 def bulk_analyze(dir_path: str) -> None:
@@ -714,20 +723,20 @@ def bulk_analyze(dir_path: str) -> None:
     # create working dir
     check_mkdir(WORK_DIR)
 
-    print("Removing duplicate files.")
+    tsprint("Removing duplicate files.")
     unique_files = remove_duplicate_files(sample_paths)
 
     # multiprocessing with pool
     pool = multiprocessing.Pool(NUMBERS_OF_CORES_TO_USE)
     result = pool.map(start_analysis_wrapper, unique_files)
 
-    create_meta_report(WORK_DIR)
-    print("Done?")
+    final_report = create_meta_report(WORK_DIR)
+    tsprint("[*] Done! See metadata report for tags to the different samples:\n\n" + final_report + "\n" + "-"*20)
 
 
 def start_analysis_wrapper(sample: str) -> bool: # ret false nothing done, ret true done
     if check_right_pe(sample):
-        print("Starting analyzing: " + sample)
+        tsprint("Starting analyzing: " + sample)
         try:
             analysis = AnalyzeFile(sample)
             analysis.write_report()
@@ -737,7 +746,7 @@ def start_analysis_wrapper(sample: str) -> bool: # ret false nothing done, ret t
         except UnwantedPacker:
             return False
     else:
-        print("[!] Sample is wrong type of file, no analysis on " + sample)
+        tsprint("[!] Sample is wrong type of file, no analysis on " + sample)
         return False
 
 
@@ -752,6 +761,10 @@ def flatten_list(nested_list: list):
         else:
             yield sublist
 
+
+def tsprint(to_print: str) -> None:
+    ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"{ts}: {to_print}")
 
 def main():
     desc = "Picky! Because there are always better things to look at!\nSupposed to be bulk based. Takes a file or dir."
