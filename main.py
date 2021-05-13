@@ -537,6 +537,9 @@ class PEDataAnalysis:
                         self.export_list.append(exp_name)
             except KeyError:
                 self.export_list = []
+            except AttributeError:
+                # PE object has no attribute 'DIRECTORY_ENTRY_EXPORT' ಥ_ಥ
+                self.export_list = []
 
     def __import_analysis(self):
         for imp in self.import_list:
