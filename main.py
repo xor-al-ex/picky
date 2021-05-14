@@ -595,8 +595,11 @@ class PEDataAnalysis:
                         if getattr(sect, value):
                             permissions.append(perm)
 
-            # check if virtual size is larger than 170% of raw size -> packed?
-            sect_size_diff = True if sect.Misc_VirtualSize > sect.SizeOfRawData * 1.7 else False
+            # check if virtual size is larger than 150% of raw size -> packed? and not .data
+            if sect.Misc_VirtualSize > sect.SizeOfRawData * 1.5 and sect_name is not ".data":
+                sect_size_diff = True
+            else:
+                sect_size_diff = False
 
             sect_analysis = {
                 "unusual_name": unusual_name,
