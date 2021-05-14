@@ -74,6 +74,7 @@ class UnwantedPacker(Error):
     pass
 
 
+# Yes I know I should use one parent file class and inherit. Future work or something. ( ´･･)ﾉ(._.`)
 class AnalyzeFile:
     def __init__(self, path: str):
         global ANALYZED_FILES
