@@ -13,6 +13,10 @@ import re
 import pefile
 import peutils
 import multiprocessing
+import requests
+import psutil
+import signal
+import pebble
 
 from shutil import copyfile
 from copy import deepcopy
@@ -23,6 +27,7 @@ import capa.main
 import capa.rules
 from capa.render import convert_capabilities_to_result_document
 
+STARTTIME = datetime.utcnow()
 RULES_PATH = f"files{os.sep}capa-rules"
 
 # should most likely make a global variables init function. ¯\_(ツ)_/¯
@@ -89,6 +94,7 @@ class AnalyzeFile:
         self.pedata = ""
         self.tags_list = list()
         self.capa_tags = dict()
+        self.malware_bazaar_tags = list()
 
         # use hashes md5 to create unique folder and file name
         self.__calculate_hashes()
@@ -115,11 +121,18 @@ class AnalyzeFile:
         # rewrite self.path to new file
         self.path = self.working_dir + os.sep + self.hashes["md5"] + ".PE"
 
+        # Gathering malware bazaar data
+        self.__malware_bazaar_search()
+
         # Populating analysis
         self.floss = FLOSSAnalysis(self.path, self.working_dir)
 
-        capa_analysis = CapaAnalysis(self.path)
-        self.capa_dict = capa_analysis.capa_dict
+        try:
+            capa_analysis = CapaAnalysis(self.path)
+            self.capa_dict = capa_analysis.capa_dict
+        except ZeroDivisionError:
+            # WTH?
+            self.capa_dict = {}
 
         self.pedata = PEDataAnalysis(self.path)
 
@@ -149,11 +162,33 @@ class AnalyzeFile:
         sha256.update(self.binary_data)
         self.hashes["sha256"] = sha256.hexdigest()
 
+    def __malware_bazaar_search(self):
+        headers = {'APi-KEY': ''}
+        data = {
+            'query': 'get_info',
+            'hash': self.hashes["sha256"]
+        }
+        response = requests.post("https://mb-api.abuse.ch/api/v1/", data=data, headers=headers, timeout=15)
+        if response.status_code != 200:
+            self.malware_bazaar_tags = ["Error: HTTP status: " + str(response.status_code)]
+            return
+        json_response = json.loads(response.content.decode("utf-8", "ignore"))
+        if json_response["query_status"] != "ok":
+            self.malware_bazaar_tags = ["Query status: " + json_response["query_status"]]
+            return
+        self.malware_bazaar_tags = json_response["data"]["tags"]
+        return
+
     def pprint(self):
         print(self.create_report())
         print("Done!")
 
     def create_report(self) -> str:
+        if "strings" not in self.floss.json.keys():
+            # Floss has failed, need to populate with empty dict
+            self.floss.json["strings"] = {"stack_strings": list(),
+                                          "decode_strings": list(),
+                                          "static_strings": list()}
         self.__generate_tags()
         final_report = f"Filname: {self.filename}\n" \
                        f"Path to file: {self.path}\n" \
@@ -161,9 +196,10 @@ class AnalyzeFile:
                        f"  MD5:\t\t{self.hashes['md5']}\n" \
                        f"  SHA1:\t\t{self.hashes['sha1']}\n" \
                        f"  SHA256:\t{self.hashes['sha256']}\n\n" \
-                       f"Tags: {', '.join(self.tags_list)}\n" \
-                       f"Tags (subset from capa): {', '.join(self.capa_tags)}\n\n" \
-                       f"PeID: {', '.join(self.peid) if self.peid else 'No signature hits'}\n\n" \
+                       f"Tags:\t\t\t\t\t\t{', '.join(self.tags_list)}\n" \
+                       f"Tags (subset from capa):\t{', '.join(self.capa_tags)}\n" \
+                       f"Malware Bazaar:\t\t\t\t{', '.join(self.malware_bazaar_tags)}\n" \
+                       f"PeID:\t\t\t\t\t\t{', '.join(self.peid) if self.peid else 'No signature hits'}\n\n" \
                        f"PE Metadata analysis:\n" \
                        f"  Is 32-bit: {'Yes' if self.pedata.is32bit else 'No'}\t\t\t" \
                        f"Is dll: {'Yes' if self.pedata.isdll else 'No'}\n" \
@@ -304,6 +340,7 @@ class AnalyzeFile:
             "destructive": ["delete volume", "overwrite master boot"],
             "pusha_popa": ["pusha popa"],
             "peb": ["peb "],
+            "fs": ["fs "],
             "dynamic_resolved_functions": ["link function at runtime"],
             "persistence": ["persist", "scheduled"]
         }
@@ -419,6 +456,7 @@ class CapaAnalysis:
             return unnest
 
 
+# FLOSS would randomly stuck on a file and use all memory on system...
 class FLOSSAnalysis:
     def __init__(self, path: str, workdir: str):
         self.path = path
@@ -435,12 +473,34 @@ class FLOSSAnalysis:
     def __run_floss(self):
         # Forgive me father, for I have sinned.
         tempjson = f"{str(uuid.uuid4())}_tmp.json"
-        result = subprocess.run([f"files{os.sep}floss.exe", "-q", "-o", tempjson, self.path],
-                                capture_output=True)
+        with subprocess.Popen([f"files{os.sep}floss.exe", "-q", "-o", tempjson, self.path],
+                              stderr=subprocess.PIPE, stdout=subprocess.PIPE) as process:
+            try:
+                stdout, stderr = process.communicate(timeout=180)
+            except subprocess.TimeoutExpired:
+                gone, alive = self.__murder_floss_family(process.pid)
+                return
+
+#        try:
+#            result = subprocess.run([f"files{os.sep}floss.exe", "-q", "-o", tempjson, self.path],
+#                                    capture_output=True, timeout=180)
+#        except subprocess.TimeoutExpired:
+#            gone, alive = self.__murder_floss_family(result.pid)
         with open(tempjson, "r") as fp:
             self.json = json.load(fp)
 
         os.remove(tempjson)
+
+    def __murder_floss_family(self, pid: int):
+        tsprint("Oh boy! Here I go murdering again!")
+        parent = psutil.Process(pid)
+        children = parent.children(recursive=True)
+        # spare no one!
+        children.append(parent)
+        for p in children:
+            p.send_signal(signal.SIGTERM)
+        gone, alive = psutil.wait_procs(children, timeout=None, callback=None)
+        return (gone, alive)
 
     def __save_json(self):
         with open(f"{self.workdir}{os.sep}floss_output_{self.filename}.json", "w") as fp:
@@ -476,6 +536,12 @@ class FLOSSAnalysis:
         return matches_list
 
     def __string_analysis(self):
+        if "strings" not in self.json.keys():
+            # Floss has failed, need to populate with empty dict
+            self.json["strings"] = {"stack_strings": list(),
+                                    "decoded_strings": list(),
+                                    "static_strings": list()}
+
         # Could ofc create some complex matching algorithm, buuuut...
         interesting_static = self.__matching(self.json["strings"]["static_strings"])
         interesting_decoded = self.__matching(self.json["strings"]["decoded_strings"], function_names=True)
@@ -597,7 +663,7 @@ class PEDataAnalysis:
                             permissions.append(perm)
 
             # check if virtual size is larger than 150% of raw size -> packed? and not .data
-            if sect.Misc_VirtualSize > sect.SizeOfRawData * 1.5 and sect_name is not ".data":
+            if sect.Misc_VirtualSize > sect.SizeOfRawData * 1.5 and sect_name != ".data":
                 sect_size_diff = True
             else:
                 sect_size_diff = False
@@ -692,6 +758,7 @@ def create_meta_report(path_to_base_working_dir: str) -> str: # path to final me
     for path in Path(path_to_base_working_dir).rglob("PickyReport*"):
         meta_dict = dict()
         report_file = open(path, "r")
+        break_out = 0
         while True:
             line = report_file.readline()
             if line.startswith("Path to file"):
@@ -699,12 +766,20 @@ def create_meta_report(path_to_base_working_dir: str) -> str: # path to final me
                 meta_dict["Path:"] = line
             elif line.startswith("Tags:"):
                 meta_dict["Tags:"] = line
-            elif line.startswith("Tags (subset from capa): "):
+            elif line.startswith("Tags (subset from capa):"):
                 meta_dict["Tags (subset from capa):"] = line
-            elif line.startswith("PeID: "):
+            elif line.startswith("Malware Bazaar:"):
+                meta_dict["Malware Bazaar:"] = line
+            elif line.startswith("PeID:"):
                 meta_dict["PeID:"] = line
 
-            if len(meta_dict.keys()) == 4:
+            if len(meta_dict.keys()) == 5:
+                break
+            break_out += 1
+            if break_out >= 100:
+                # something wrok has happend with reading the report file
+                if meta_dict.keys() == 0:
+                    meta_dict["Report parsing error"] = "Could not read individual report."
                 break
 
         report_file.close()
@@ -732,13 +807,37 @@ def bulk_analyze(dir_path: str) -> None:
 
     tsprint("Removing duplicate files.")
     unique_files = remove_duplicate_files(sample_paths)
+    tsprint(f"New list contains {str(len(unique_files))} items!")
 
+    # multiprocess with pebble
+    with pebble.ProcessPool(max_workers=NUMBERS_OF_CORES_TO_USE) as pool:
+        future = pool.map(start_analysis_wrapper, unique_files, timeout=300)
+
+        iterator = future.result()
+        while True:
+            try:
+                result = next(iterator)
+            except StopIteration:
+                break
+            except TimeoutError:
+                tsprint("[!!] Analysis took too long, aborting it!")
+            except Exception as error:
+                tsprint("Error raised in analysis:")
+                print(error)
     # multiprocessing with pool
-    pool = multiprocessing.Pool(NUMBERS_OF_CORES_TO_USE)
-    result = pool.map(start_analysis_wrapper, unique_files)
+    #pool = multiprocessing.Pool(NUMBERS_OF_CORES_TO_USE)
+    #result = pool.map(start_analysis_wrapper, unique_files)
+    #result = pool.map_async(start_analysis_wrapper, unique_files)
 
+    tsprint("[*] Done with individual reports! Starting on meta report now!")
     final_report = create_meta_report(WORK_DIR)
     tsprint("[*] Done! See metadata report for tags to the different samples:\n\n" + final_report + "\n" + "-"*20)
+
+
+def pool_error(err):
+    tsprint("Pool error, still going strong?")
+    print(err)
+    return
 
 
 def start_analysis_wrapper(sample: str) -> bool: # ret false nothing done, ret true done
@@ -802,6 +901,8 @@ def main():
 
     if os.path.isdir(args.sample):
         bulk_analyze(args.sample)
+        stoptime = datetime.utcnow()
+        print("\nThe execution tok " + str(stoptime-STARTTIME) + "\n")
         sys.exit(0)
 
     else:
