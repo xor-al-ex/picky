@@ -95,6 +95,7 @@ class AnalyzeFile:
         self.tags_list = list()
         self.capa_tags = dict()
         self.malware_bazaar_tags = list()
+        self.difficulty = {"easy": 0, "intermediate": 0, "hard": 0}
 
         # use hashes md5 to create unique folder and file name
         self.__calculate_hashes()
@@ -104,7 +105,14 @@ class AnalyzeFile:
         else:
             self.working_dir = os.path.dirname(self.path) + os.sep + WORK_DIR + os.sep + self.hashes["md5"]
 
-        # Checking for unwanted packers
+        # Checking for unwanted packers and difficulty
+        packer_difficulty_dict = {
+            "easy": ["upx", "aspack", "nullsoft"],
+            "intermediate": ["pecomapct", "themida"],
+            "hard": ["armadillo", "exe_stealth", "asprotect", "obsidium", "execryptor", "vmprotect"]
+        }
+        # Because PEiD has many duplicate we have a match list
+        peid_hitlist = list()
         self.peid = self.__yara_peid()
         for match in self.peid:
             if "delphi" in match.lower():
@@ -113,6 +121,18 @@ class AnalyzeFile:
             if "visual_basic" in match.lower():
                 tsprint("[!] Unwanted Visual Basic sample!")
                 raise UnwantedPacker
+            # Adding packer hits to difficulty hits
+            for find_list in packer_difficulty_dict.values():
+                for el in find_list:
+                    if el in match.lower():
+                        if el not in peid_hitlist:
+                            peid_hitlist.append(el)
+
+        for difficulty, find_list in packer_difficulty_dict.items():
+            for el in find_list:
+                if el in peid_hitlist:
+                    self.difficulty[difficulty] += 1
+
 
         # creating working directory
         check_mkdir(self.working_dir)
@@ -250,112 +270,149 @@ class AnalyzeFile:
         final_report += "Statically imported functions:\n  " + ' \n  '.join(self.pedata.import_list) + '\n'
         final_report += f"Statically exported functions:\n  " + '\n  '.join(self.pedata.export_list) + '\n'
 
+        # "Hiding" the difficulty numbers at the bottom
+        final_report += f"easy:{self.difficulty['easy']} intermediate:{self.difficulty['intermediate']} hard:{self.difficulty['hard']}"
+
         return final_report
 
     def __generate_tags(self) -> None:
         tags = {
-            "exe": False,
-            "dll": False,
-            "tls": False,
-            "exports": False,
-            "exe_with_exports": False,
-            "few_imports": False,
-            "packed": False,
-            "unusual_section_name": False,
-            "unusual_section_permissions": False,
-            "raw_virtual_size_diff": False,
-            "interesting_stack_strings": False,
-            "stack_strings": False,
-            "interesting_decoded_string": False,
-            "decoded_strings": False,
-            "decoded_function_names": False,
-            "interesting_static_strings": False,
-            "network": False,
-            "keylogger": False,
-            "ransomware": False,
-            "anti_vm": False,
-            "anti_disasm": False,
-            "anti_debugging": False,
-            "anti_analysis_tools": False,
-            "anti_av": False,
-            "indirect_call": False,
-            "registry": False
+            "info": {
+                "exe": False,
+                "dll": False,
+                "exports": False,
+                "few_imports": False
+            },
+            "easy": {
+                "interesting_static_strings": False,
+                "interesting_stack_strings": False,
+                "stack_function_names": False,
+                "stack_strings": False,
+                "anti_debugging": False,
+                "anti_analysis_tools": False,
+                "anti_vm": False,
+                "network": False,
+                "keylogger": False,
+                "anti_av": False,
+            },
+            "intermediate": {
+                "tls": False,
+                "exe_with_exports": False,
+                "packed": False,
+                "unusual_section_name": False,
+                "unusual_section_permissions": False,
+                "raw_virtual_size_diff": False,
+                "interesting_decoded_string": False,
+                "decoded_strings": False,
+                "decoded_function_names": False,
+                "ransomware": False,
+                "anti_disasm": False,
+                "indirect_call": False,
+                "registry": False
+            }
         }
-        if self.pedata.isdll:
-            tags["dll"] = True
-        else:
-            tags["exe"] = True
 
-        tags["tls"] = self.pedata.tls
-        tags["exports"] = len(self.pedata.export_list) > 0
-        tags["exe_with_exports"] = True if tags["exe"] and tags["exports"] else False
-        tags["few_imports"] = True if len(self.pedata.import_list) <= 15 else False
-        tags["packed"] = self.pedata.probably_packed
+        if self.pedata.isdll:
+            tags["info"]["dll"] = True
+        else:
+            tags["info"]["exe"] = True
+
+        tags["intermediate"]["tls"] = self.pedata.tls
+        tags["info"]["exports"] = len(self.pedata.export_list) > 0
+        tags["intermediate"]["exe_with_exports"] = True if tags["info"]["exe"] and tags["info"]["exports"] else False
+        tags["info"]["few_imports"] = True if len(self.pedata.import_list) <= 15 else False
+        tags["intermediate"]["packed"] = self.pedata.probably_packed
         for section in self.pedata.section_analysis.values():
             if section["unusual_name"]:
-                tags["unusual_section_name"] = True
+                tags["intermediate"]["unusual_section_name"] = True
             if section["unusual_permissions"]:
-                tags["unusual_section_permissions"] = True
+                tags["intermediate"]["unusual_section_permissions"] = True
             if section["raw_virtual_size_diff"]:
-                tags["raw_virtual_size_diff"] = True
-        tags["stack_strings"] = True if len(self.floss.json["strings"]["stack_strings"]) > 0 else False
-        tags["interesting_stack_strings"] = True if len(self.floss.interesting_strings["stack"]) > 0 else False
-        tags["decoded_strings"] = True if len(self.floss.json["strings"]["decoded_strings"]) > 0 else False
-        tags["interesting_decoded_string"] = True if len(self.floss.interesting_strings["decoded"]) > 0 else False
-        tags["interesting_static_strings"] = True if len(self.floss.interesting_strings["static"]) > 0 else False
+                tags["intermediate"]["raw_virtual_size_diff"] = True
+        tags["easy"]["stack_strings"] = True if len(self.floss.json["strings"]["stack_strings"]) > 0 else False
+        tags["easy"]["interesting_stack_strings"] = True if len(self.floss.interesting_strings["stack"]) > 0 else False
+        tags["easy"]["stack_function_names"] = self.floss.stack_function_names
+        tags["intermediate"]["decoded_strings"] = True if len(self.floss.json["strings"]["decoded_strings"]) > 0 else False
+        tags["intermediate"]["interesting_decoded_string"] = True if len(self.floss.interesting_strings["decoded"]) > 0 else False
         tags["decoded_function_names"] = self.floss.decoded_function_names
+        tags["easy"]["interesting_static_strings"] = True if len(self.floss.interesting_strings["static"]) > 0 else False
+
 
         capa_rule_name_tagging = {
-            "anti_debugging": ["debug", "ntglobalfalg", "breakpoint", "heap flags", "heap force flags"],
-            "anti_av": ["sandbox"],
-            "anti_disasm": ["heavens", "anti-disasm"],
-            "anti_vm": ["anti-vm", "memory capacity"],
-            "anti_analysis_tools": ["analysis tools"],
-            "stack_strings": ["stackstrings"],
-            "packed": ["packed"],
-            "shell": ["shell"],
-            "execute": ["execute"],
-            "keylogger": ["keystroke", "clipboard"],
-            "network": ["recieve", "wininet", "winhttp", "http", "url", "internet", "sock", "tcp", "udp", "dns",
-                        "domain information", "network"],
-            "xor": ["xor"],
-            "base64": ["base64"],
-            "rc4": ["rc4"],
-            "aes": [" aes "],
-            "des": [" des "],
-            "rsa": [" rsa "],
-            "embeded_pe": ["embedded pe"],
-            "ransomware": ["enumerate files", "enumerate disk volumes"],
-            "firewall": ["firewall"],
-            "desktop_lock": ["lock the desktop"],
-            "change_wallpaper": ["wallpaper"],
-            "cpu_info": ["cpu information", "number of processors"],
-            "mutex": ["mutex"],
-            "create_process_suspended": ["process suspended"],
-            "rwx_memory": ["rwx memory"],
-            "registry": ["registry"],
-            "start_service": ["create service", "run as service", "start service"],
-            "create_thread_suspended": ["suspend thread"],
-            "create_process": ["create process"],
-            "destructive": ["delete volume", "overwrite master boot"],
-            "pusha_popa": ["pusha popa"],
-            "peb": ["peb "],
-            "fs": ["fs "],
-            "dynamic_resolved_functions": ["link function at runtime"],
-            "persistence": ["persist", "scheduled"]
+            "easy": {
+                "anti_debugging": ["debug", "ntglobalfalg", "breakpoint", "heap flags", "heap force flags"],
+                "anti_av": ["sandbox"],
+                "anti_vm": ["anti-vm", "memory capacity"],
+                "anti_analysis_tools": ["analysis tools"],
+                "stack_strings": ["stackstrings"],
+                "keylogger": ["keystroke", "clipboard"],
+                "network": ["recieve", "wininet", "winhttp", "http", "url", "internet", "sock", "tcp", "udp", "dns",
+                            "domain information", "network"],
+                "shell": ["shell"],
+                "execute": ["execute"],
+                "xor": ["xor"],
+                "base64": ["base64"],
+                "embeded_pe": ["embedded pe"],
+                "firewall": ["firewall"],
+                "desktop_lock": ["lock the desktop"],
+                "change_wallpaper": ["wallpaper"],
+                "cpu_info": ["cpu information", "number of processors"],
+                "mutex": ["mutex"],
+                "registry": ["registry"],
+                "start_service": ["create service", "run as service", "start service"],
+                "create_process": ["create process"],
+                "persistence": ["persist", "scheduled"]
+
+            },
+            "intermediate": {
+                "anti_disasm": ["heavens", "anti-disasm"],
+                "packed": ["packed"],
+                "rc4": ["rc4"],
+                "aes": [" aes "],
+                "des": [" des "],
+                "rsa": [" rsa "],
+                "ransomware": ["enumerate files", "enumerate disk volumes"],
+                "create_process_suspended": ["process suspended"],
+                "rwx_memory": ["rwx memory"],
+                "create_thread_suspended": ["suspend thread"],
+                "destructive": ["delete volume", "overwrite master boot"],
+                "pusha_popa": ["pusha popa"],
+                "peb": ["peb "],
+                "fs": ["fs "],
+                "dynamic_resolved_functions": ["link function at runtime"],
+            }
         }
 
+        capa_level_dict = {"easy": 0, "intermediate": 0, "hard": 0}
+
+        # (＠_＠;)
         for rule_name in self.capa_dict.keys():
-            for tag, match_list in capa_rule_name_tagging.items():
-                for match in match_list:
-                    if match in rule_name.lower():
-                        if rule_name in self.capa_tags.keys():
-                            self.capa_tags[rule_name].append(tag)
-                        else:
-                            self.capa_tags[rule_name] = [match]
-                        # updateing normal tag dict
-                        if tag in tags.keys():
-                            tags[tag] = True
+            for difficulty, matching_dict in capa_rule_name_tagging.items():
+                for tag, match_list in matching_dict.items():
+                    for match in match_list:
+                        if match in rule_name.lower():
+                            capa_level_dict[difficulty] += 1
+                            if rule_name in self.capa_tags.keys():
+                                self.capa_tags[rule_name].append(tag)
+                            else:
+                                self.capa_tags[rule_name] = [match]
+                            # updating normal tag dict
+                            if tag in tags.keys():
+                                tags[tag] = True
+
+        # Since capa has some effect on tags, we now tally the different difficulty hits
+        tags_level_dict = {"easy": 0, "intermediate": 0, "hard": 0}
+        for difficulty, tags in tags.items():
+            if difficulty == "info":
+                continue
+            # We only care about the bool value, what is flagged is of no interest now.
+            for hit in tags.values:
+                if hit:
+                    tags_level_dict[difficulty] += 1
+
+        # Summarize all easy and intermediate values
+        for level in self.difficulty:
+            self.difficulty[level] = capa_level_dict[level] + tags_level_dict[level]
 
         for tag, value in tags.items():
             if value:
@@ -465,6 +522,7 @@ class FLOSSAnalysis:
         self.json = dict()
         self.interesting_strings = dict()
         self.decoded_function_names = False
+        self.stack_function_names = False
 
         self.__run_floss()
         self.__save_json()
@@ -506,8 +564,9 @@ class FLOSSAnalysis:
         with open(f"{self.workdir}{os.sep}floss_output_{self.filename}.json", "w") as fp:
             fp.write(json.dumps(self.json, indent=4, sort_keys=True))
 
-    def __matching(self, string_list: list, function_names: bool = False) -> list:
+    def __matching(self, string_list: list, function_names: bool = False) -> (list, bool):
         matches_list = list()
+        found_function_name = False
         for s in string_list:
             s_lower = s.lower()
             for match in STRINGS_LIST:
@@ -523,7 +582,7 @@ class FLOSSAnalysis:
                         continue
                     if func.lower().rstrip("\n") in s_lower:
                         if s not in matches_list:
-                            self.decoded_function_names = True
+                            found_function_name = True
                             matches_list.append(s)
 
         tmp_str = "\n".join(string_list)
@@ -533,7 +592,7 @@ class FLOSSAnalysis:
                 findall_str = ", ".join(findall)
                 matches_list.append(f"Regex->{regexname}: {findall_str}")
 
-        return matches_list
+        return matches_list, found_function_name
 
     def __string_analysis(self):
         if "strings" not in self.json.keys():
@@ -543,9 +602,11 @@ class FLOSSAnalysis:
                                     "static_strings": list()}
 
         # Could ofc create some complex matching algorithm, buuuut...
-        interesting_static = self.__matching(self.json["strings"]["static_strings"])
-        interesting_decoded = self.__matching(self.json["strings"]["decoded_strings"], function_names=True)
-        interesting_stack = self.__matching(self.json["strings"]["stack_strings"], function_names=True)
+        interesting_static, _ = self.__matching(self.json["strings"]["static_strings"])
+        interesting_decoded, self.decoded_function_names = self.__matching(self.json["strings"]["decoded_strings"],
+                                                                           function_names=True)
+        interesting_stack, self.stack_function_names = self.__matching(self.json["strings"]["stack_strings"],
+                                                                       function_names=True)
 
         self.interesting_strings = {"static": interesting_static,
                                     "decoded": interesting_decoded,
@@ -755,25 +816,35 @@ def create_meta_report(path_to_base_working_dir: str) -> str: # path to final me
                   "This report only has file path and tags associated with it. Please read extensive report and\n" \
                   "verify the findings for yourself!\n\n"
 
+    reports_dict = dict()
+    reports_counter = 0
+
+    # Finding all individual reports generated
     for path in Path(path_to_base_working_dir).rglob("PickyReport*"):
-        meta_dict = dict()
-        report_file = open(path, "r")
+        individual_dict = {"text": "", "difficulty": dict(), "difficult_score": 0.0}
+        report_file = open(path, "rb")
         break_out = 0
+        line_added = 0
         while True:
             line = report_file.readline()
-            if line.startswith("Path to file"):
+            if line.startswith(b"Path to file"):
                 # ( ´･･)ﾉ(._.`)
-                meta_dict["Path:"] = line
-            elif line.startswith("Tags:"):
-                meta_dict["Tags:"] = line
-            elif line.startswith("Tags (subset from capa):"):
-                meta_dict["Tags (subset from capa):"] = line
-            elif line.startswith("Malware Bazaar:"):
-                meta_dict["Malware Bazaar:"] = line
-            elif line.startswith("PeID:"):
-                meta_dict["PeID:"] = line
+                individual_dict["text"] += line.decode()
+                line_added += 1
+            elif line.startswith(b"Tags:"):
+                individual_dict["text"] += line.decode()
+                line_added += 1
+            elif line.startswith(b"Tags (subset from capa):"):
+                individual_dict["text"] += line.decode()
+                line_added += 1
+            elif line.startswith(b"Malware Bazaar:"):
+                individual_dict["text"] += line.decode()
+                line_added += 1
+            elif line.startswith(b"PeID:"):
+                individual_dict["text"] += line.decode()
+                line_added += 1
 
-            if len(meta_dict.keys()) == 5:
+            if line_added == 5:
                 break
             break_out += 1
             if break_out >= 100:
@@ -781,12 +852,37 @@ def create_meta_report(path_to_base_working_dir: str) -> str: # path to final me
                 if meta_dict.keys() == 0:
                     meta_dict["Report parsing error"] = "Could not read individual report."
                 break
+        # Get the difficulty "scores"
+        report_file.seek(-2, os.SEEK_END)
+        while f.read(1) != b'\n':
+            f.seek(-2, os.SEEK_CUR)
+        last_line = f.readline().decode()
+        individual_dict["text"] += last_line + "\n"
+        space_split = last_line.split(" ")
+        for split in space_split:
+            diff_split = split.split(":")
+            individual_dict["difficulty"] = {diff_split[0]: diff_split[1]}
+
+        # We make the easy and intermediate score into a float = easy.99-medium that is difficult_score
+        # This creates a value that we can sort by size, high easy-score and low medium score first
+        # File that as given a hard-value are out of scope, but we list them at the bottom of the meta-report
+        individual_dict = float(f"{individual_dict['difficulty']['easy']}.{99-individual_dict['difficulty']['intermediate']}")
 
         report_file.close()
-        for key, value in meta_dict.items():
-            #meta_report += f"{key}: {value}"
-            meta_report += value
-        meta_report += "\n"
+        # adding individual to overarching dict
+        reports_dict[reports_counter] = individual_dict
+        reports_counter += 1
+
+    # Sorting by difficulty...
+"""for el in sorted(meta_list, key=attrgetter("score"), reverse=True):
+    ...:     print(el.text, el.score)
+    ...:
+    class MetaRep:
+    ...:     def __init__(self, text, score):
+    ...:         self.text = text
+    ...:         self.score = score
+    ...:"""
+
 
     report_path = f"{path_to_base_working_dir}{os.sep}PickyMetaReport.txt"
     with open(report_path, "w") as fp:
