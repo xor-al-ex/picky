@@ -22,6 +22,7 @@ from shutil import copyfile
 from copy import deepcopy
 from pathlib import Path
 from datetime import datetime
+from operator import attrgetter
 
 import capa.main
 import capa.rules
@@ -268,7 +269,7 @@ class AnalyzeFile:
 
         # import and export
         final_report += "Statically imported functions:\n  " + ' \n  '.join(self.pedata.import_list) + '\n'
-        final_report += f"Statically exported functions:\n  " + '\n  '.join(self.pedata.export_list) + '\n'
+        final_report += f"Statically exported functions:\n  " + '\n  '.join(self.pedata.export_list) + '\n\n'
 
         # "Hiding" the difficulty numbers at the bottom
         final_report += f"easy:{self.difficulty['easy']} intermediate:{self.difficulty['intermediate']} hard:{self.difficulty['hard']}"
@@ -334,7 +335,7 @@ class AnalyzeFile:
         tags["easy"]["stack_function_names"] = self.floss.stack_function_names
         tags["intermediate"]["decoded_strings"] = True if len(self.floss.json["strings"]["decoded_strings"]) > 0 else False
         tags["intermediate"]["interesting_decoded_string"] = True if len(self.floss.interesting_strings["decoded"]) > 0 else False
-        tags["decoded_function_names"] = self.floss.decoded_function_names
+        tags["intermediate"]["decoded_function_names"] = self.floss.decoded_function_names
         tags["easy"]["interesting_static_strings"] = True if len(self.floss.interesting_strings["static"]) > 0 else False
 
 
@@ -402,21 +403,22 @@ class AnalyzeFile:
 
         # Since capa has some effect on tags, we now tally the different difficulty hits
         tags_level_dict = {"easy": 0, "intermediate": 0, "hard": 0}
-        for difficulty, tags in tags.items():
+        for difficulty, tagss in tags.items():
             if difficulty == "info":
                 continue
             # We only care about the bool value, what is flagged is of no interest now.
-            for hit in tags.values:
+            for hit in tagss.values():
                 if hit:
                     tags_level_dict[difficulty] += 1
 
         # Summarize all easy and intermediate values
         for level in self.difficulty:
-            self.difficulty[level] = capa_level_dict[level] + tags_level_dict[level]
+            self.difficulty[level] += capa_level_dict[level] + tags_level_dict[level]
 
-        for tag, value in tags.items():
-            if value:
-                self.tags_list.append(tag)
+        for tag_dict in tags.values():
+            for t, hit in tag_dict.items():
+                if hit:
+                    self.tags_list.append(t)
 
     def write_report(self):
         with open(f"{self.working_dir}{os.sep}PickyReport_{os.path.basename(self.path)}.txt", "w") as fp:
@@ -534,7 +536,7 @@ class FLOSSAnalysis:
         with subprocess.Popen([f"files{os.sep}floss.exe", "-q", "-o", tempjson, self.path],
                               stderr=subprocess.PIPE, stdout=subprocess.PIPE) as process:
             try:
-                stdout, stderr = process.communicate(timeout=180)
+                stdout, stderr = process.communicate(timeout=120)
             except subprocess.TimeoutExpired:
                 gone, alive = self.__murder_floss_family(process.pid)
                 return
@@ -812,77 +814,90 @@ def remove_duplicate_files(path_list: list) -> list:
 
 
 def create_meta_report(path_to_base_working_dir: str) -> str: # path to final meta report
+    # Create a internal class that we can use to sort the gathered individual reports
+    class MetaRep:
+        def __init__(self, text="", score=0.0, hard=0):
+            self.text = text
+            self.score = score
+            self.hard = hard
+
     meta_report = "Meta report for Picky's bulk analysis.\n" \
                   "This report only has file path and tags associated with it. Please read extensive report and\n" \
                   "verify the findings for yourself!\n\n"
 
-    reports_dict = dict()
-    reports_counter = 0
-
+    individual_report_list = list()
+    hard_individual_report_list = list()
+    reports_counter=0
     # Finding all individual reports generated
     for path in Path(path_to_base_working_dir).rglob("PickyReport*"):
-        individual_dict = {"text": "", "difficulty": dict(), "difficult_score": 0.0}
+        metarep_obj = MetaRep()
         report_file = open(path, "rb")
         break_out = 0
         line_added = 0
         while True:
             line = report_file.readline()
             if line.startswith(b"Path to file"):
-                # ( ´･･)ﾉ(._.`)
-                individual_dict["text"] += line.decode()
+                metarep_obj.text += line.decode().rstrip() + "\n" # Has do remove all linebreaks and add new to have concistency
                 line_added += 1
             elif line.startswith(b"Tags:"):
-                individual_dict["text"] += line.decode()
+                metarep_obj.text += line.decode().rstrip() + "\n"
                 line_added += 1
             elif line.startswith(b"Tags (subset from capa):"):
-                individual_dict["text"] += line.decode()
+                metarep_obj.text += line.decode().rstrip() + "\n"
                 line_added += 1
             elif line.startswith(b"Malware Bazaar:"):
-                individual_dict["text"] += line.decode()
+                metarep_obj.text += line.decode().rstrip() + "\n"
                 line_added += 1
             elif line.startswith(b"PeID:"):
-                individual_dict["text"] += line.decode()
+                metarep_obj.text += line.decode().rstrip() + "\n"
                 line_added += 1
 
             if line_added == 5:
                 break
             break_out += 1
             if break_out >= 100:
-                # something wrok has happend with reading the report file
-                if meta_dict.keys() == 0:
-                    meta_dict["Report parsing error"] = "Could not read individual report."
+                # something wrong has happened with reading the report file
+                metarep_obj.text += "Something went wrong with parsing individual report and had to abort."
                 break
         # Get the difficulty "scores"
         report_file.seek(-2, os.SEEK_END)
-        while f.read(1) != b'\n':
-            f.seek(-2, os.SEEK_CUR)
-        last_line = f.readline().decode()
-        individual_dict["text"] += last_line + "\n"
+        while report_file.read(1) != b'\n':
+            report_file.seek(-2, os.SEEK_CUR)
+        last_line = report_file.readline().decode().rstrip() + "\n"
+        metarep_obj.text += last_line + "\n"
+
         space_split = last_line.split(" ")
+        temp_diff_dict = {"easy": 0, "intermediate": 0, "hard": 0}
         for split in space_split:
             diff_split = split.split(":")
-            individual_dict["difficulty"] = {diff_split[0]: diff_split[1]}
+            temp_diff_dict[diff_split[0]] = int(diff_split[1])
 
         # We make the easy and intermediate score into a float = easy.99-medium that is difficult_score
         # This creates a value that we can sort by size, high easy-score and low medium score first
         # File that as given a hard-value are out of scope, but we list them at the bottom of the meta-report
-        individual_dict = float(f"{individual_dict['difficulty']['easy']}.{99-individual_dict['difficulty']['intermediate']}")
+        metarep_obj.score = float(f"{temp_diff_dict['easy']}.{99-temp_diff_dict['intermediate']}")
+
+        # adding individual reports to respective lists
+        if temp_diff_dict["hard"] > 0:
+            metarep_obj.hard = temp_diff_dict["hard"]
+            hard_individual_report_list.append(metarep_obj)
+        else:
+            individual_report_list.append(metarep_obj)
 
         report_file.close()
-        # adding individual to overarching dict
-        reports_dict[reports_counter] = individual_dict
         reports_counter += 1
 
-    # Sorting by difficulty...
-"""for el in sorted(meta_list, key=attrgetter("score"), reverse=True):
-    ...:     print(el.text, el.score)
-    ...:
-    class MetaRep:
-    ...:     def __init__(self, text, score):
-    ...:         self.text = text
-    ...:         self.score = score
-    ...:"""
+    # Sorting list by difficulty. Most easy and least intermediate at the top. Hard is appended at the end.
+    individual_report_list = sorted(individual_report_list, key=attrgetter("score"), reverse=True)
+    individual_report_list += hard_individual_report_list
 
+    # populating the meta_report that is to be written
+    meta_report += f"We found {reports_counter} individual reports to make this MetaReport on!\n" \
+                   f"The reports underneath are sorted by highest 'easy' number then 'intermediate'." \
+                   f"Files given a hard-score is at the bottom unsorted.\n\n"
+
+    for report in individual_report_list:
+        meta_report += report.text + "\n"
 
     report_path = f"{path_to_base_working_dir}{os.sep}PickyMetaReport.txt"
     with open(report_path, "w") as fp:
@@ -907,10 +922,11 @@ def bulk_analyze(dir_path: str) -> None:
 
     # multiprocess with pebble
     with pebble.ProcessPool(max_workers=NUMBERS_OF_CORES_TO_USE) as pool:
-        future = pool.map(start_analysis_wrapper, unique_files, timeout=300)
+        future = pool.map(start_analysis_wrapper, unique_files, timeout=180)
 
         iterator = future.result()
         while True:
+            # TODO: Figure out why timeout error is not caught and passed to generic handler
             try:
                 result = next(iterator)
             except StopIteration:
