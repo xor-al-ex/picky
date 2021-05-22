@@ -1,3 +1,6 @@
 [submodule "capa-rules"]
 	path = files/capa-rules
 	url = https://github.com/fireeye/capa-rules.git
+[submodule "files/capa"]
+	path = files/capa
+	url = https://github.com/fireeye/capa.git
