@@ -108,8 +108,7 @@ class AnalyzeFile:
 
         # Checking for unwanted packers and difficulty
         packer_difficulty_dict = {
-            "easy": ["upx", "aspack", "nullsoft"],
-            "intermediate": ["pecomapct", "themida"],
+            "intermediate": ["pecompact", "themida", "upx", "aspack", "nullsoft"],
             "hard": ["armadillo", "exe_stealth", "asprotect", "obsidium", "execryptor", "vmprotect"]
         }
         # Because PEiD has many duplicate we have a match list
@@ -282,7 +281,9 @@ class AnalyzeFile:
                 "exe": False,
                 "dll": False,
                 "exports": False,
-                "few_imports": False
+                "few_imports": False,
+                "32-bit": False,
+                "64-bit": False
             },
             "easy": {
                 "interesting_static_strings": False,
@@ -303,7 +304,7 @@ class AnalyzeFile:
                 "unusual_section_name": False,
                 "unusual_section_permissions": False,
                 "raw_virtual_size_diff": False,
-                "interesting_decoded_string": False,
+                "interesting_decoded_strings": False,
                 "decoded_strings": False,
                 "decoded_function_names": False,
                 "ransomware": False,
@@ -317,6 +318,10 @@ class AnalyzeFile:
             tags["info"]["dll"] = True
         else:
             tags["info"]["exe"] = True
+        if self.pedata.is32bit:
+            tags["info"]["32-bit"] = True
+        else:
+            tags["info"]["64-bit"] = True
 
         tags["intermediate"]["tls"] = self.pedata.tls
         tags["info"]["exports"] = len(self.pedata.export_list) > 0
@@ -334,7 +339,7 @@ class AnalyzeFile:
         tags["easy"]["interesting_stack_strings"] = True if len(self.floss.interesting_strings["stack"]) > 0 else False
         tags["easy"]["stack_function_names"] = self.floss.stack_function_names
         tags["intermediate"]["decoded_strings"] = True if len(self.floss.json["strings"]["decoded_strings"]) > 0 else False
-        tags["intermediate"]["interesting_decoded_string"] = True if len(self.floss.interesting_strings["decoded"]) > 0 else False
+        tags["intermediate"]["interesting_decoded_strings"] = True if len(self.floss.interesting_strings["decoded"]) > 0 else False
         tags["intermediate"]["decoded_function_names"] = self.floss.decoded_function_names
         tags["easy"]["interesting_static_strings"] = True if len(self.floss.interesting_strings["static"]) > 0 else False
 
@@ -893,7 +898,7 @@ def create_meta_report(path_to_base_working_dir: str) -> str: # path to final me
 
     # populating the meta_report that is to be written
     meta_report += f"We found {reports_counter} individual reports to make this MetaReport on!\n" \
-                   f"The reports underneath are sorted by highest 'easy' number then 'intermediate'." \
+                   f"The reports underneath are sorted by highest 'easy' number then 'intermediate'. " \
                    f"Files given a hard-score is at the bottom unsorted.\n\n"
 
     for report in individual_report_list:
