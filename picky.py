@@ -100,8 +100,8 @@ class AnalyzeFile:
 
         # use hashes md5 to create unique folder and file name
         self.__calculate_hashes()
-        # So there is some fuckup when doing single and multiprocess, checking for abs path
-        if WORK_DIR[1] == ":":
+        # So there is some fuckup when doing single and multiprocess, checking for abs path windows or unix
+        if WORK_DIR[1] == ":" or WORK_DIR[0] == "/":
             self.working_dir = WORK_DIR + os.sep + self.hashes["md5"]
         else:
             self.working_dir = os.path.dirname(self.path) + os.sep + WORK_DIR + os.sep + self.hashes["md5"]
