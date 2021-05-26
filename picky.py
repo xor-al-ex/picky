@@ -23,6 +23,7 @@ from copy import deepcopy
 from pathlib import Path
 from datetime import datetime
 from operator import attrgetter
+from sys import platform
 
 import capa.main
 import capa.rules
@@ -50,6 +51,12 @@ RULES = capa.main.get_rules(RULES_PATH, disable_progress=True)
 RULES = capa.rules.RuleSet(RULES)
 
 PEID_RULES = yara.compile(f"files{os.sep}peid.yar")
+
+# Checking OS for choosing right floss PE
+if platform == "linux" or platform == "linux2":
+    FLOSS = f"files{os.sep}floss"
+if platform == "win32":
+    FLOSS = f"files{os.sep}floss.exe"
 
 # regex expressions gotten from https://gchq.github.io and re-search.py by Didier Stevens
 REGEX_EXPRESSIONS = {
@@ -538,7 +545,7 @@ class FLOSSAnalysis:
     def __run_floss(self):
         # Forgive me father, for I have sinned.
         tempjson = f"{str(uuid.uuid4())}_tmp.json"
-        with subprocess.Popen([f"files{os.sep}floss.exe", "-q", "-o", tempjson, self.path],
+        with subprocess.Popen([FLOSS, "-q", "-o", tempjson, self.path],
                               stderr=subprocess.PIPE, stdout=subprocess.PIPE) as process:
             try:
                 stdout, stderr = process.communicate(timeout=120)
