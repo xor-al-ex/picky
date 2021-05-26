@@ -2,6 +2,7 @@ Picky! Because there are always a more suitable sample!
 
 Installation:
 git clone --recurse-submodules https://github.com/xor-al-ex/picky.git
+cd picky/
 # Recommend using virtual environment
     python3 -m venv picky-env
     unix: source picky-env/bin/activate
