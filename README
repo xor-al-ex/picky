@@ -1,4 +1,4 @@
-Picky! Becasue there are always a more suitable sample!
+Picky! Because there are always a more suitable sample!
 
 Installation:
 git clone --recurse-submodules https://github.com/xor-al-ex/picky.git
@@ -16,3 +16,28 @@ python3 -m pip install -r requirements.txt
 # If windows:
     python3 -m pip install python-magic-bin==0.4.14
 
+
+Usage:
+Picky can be used on individual files or folders with samples. It automatically detects if it is a folder, and begins
+bulk analysis. Per default uses picky 4 analysis process in bulk-analysis, can be specified with the -m switch.
+Single files gives only individual report, bulk creates the MetaReport-file as well.
+
+You should be inside of picky's directory, and have virtual environment activated (if used). The malware file(s) can be
+located elsewhere.
+
+Example of runs:
+    python3 picky.py /home/user/malware/
+    python3 picky.py /home/user/malware/sample.exe
+    python3 picky.py -m 8 /home/user/malware/
+
+Example; How to review the bulk analysis:
+1. After the analysis is complete, go to the new picky_analysis folder created inside the malware folder.
+2. Open "PickyMetaReport.txt" to view the tags created from the different analyses done.
+    - The different entries are sorted by "difficulty score", the potential easiest first. Advanced packers at the bottom.
+3. Manual review or use text search to find samples with wanted functionality or criteria.
+4. When you have found a promising sample, got to the working directory of the sample and open its individual report
+5. Review the individual report to assert usefulness / accuracy in reporting
+    - If it looks too complex or interesting go back to step 2
+6. Do your own manual analysis of the sample to verify the findings (open file in disassembler and verify capa's reporting for instance)
+    - If unsuitable, go back to step 2
+7. Take notes and save file for use in educational setting (remember archive and set password to avoid losing it to anti-malware systems).
