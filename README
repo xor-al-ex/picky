@@ -2,5 +2,17 @@ Picky! Becasue there are always a more suitable sample!
 
 Installation:
 git clone --recurse-submodules https://github.com/xor-al-ex/picky.git
-requirements.txt
-install capa from repo in files
+# Recommend using virtual environment
+    python3 -m venv picky-env
+    unix: source picky-env/bin/activate
+    windows: picky-env\Scripts\activate.bat
+
+# Install capa from repo
+cd files/capa
+python3 setup.py install
+cd ../..
+# Install requirements
+python3 -m pip install -r requirements.txt
+# If windows:
+    python3 -m pip install python-magic-bin==0.4.14
+
