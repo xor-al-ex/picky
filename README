@@ -6,7 +6,7 @@ deems unimportant in finding educational malware. What it does is creating repor
 friendly malware samples. These reports are created so that an educator more easily can find the best sample for their
 course, and focus more on creating a better lecture than reversing random binaries.
 
-As of now will picky only analyse PE files, and not scripts or documents. It is built so it can be given an arbitrarily
+As of now picky will only analyse PE files, and not scripts or documents. It is built so it can be given an arbitrarily
 large folder of malware, and remove unwanted files. Depending on hardware and resources given, it can take around 10 minutes
 to complete a set of 100 samples.
 
@@ -30,9 +30,9 @@ python3 -m pip install -r requirements.txt
 
 
 Usage:
-Picky can be used on individual files or folders with samples. It automatically detects if it is a folder, and begins
-bulk analysis. Per default uses picky 4 analysis process in bulk-analysis, can be specified with the -m switch.
-Single files gives only individual report, bulk creates the MetaReport-file as well.
+Picky can be used on a individual file or a folder with samples. It automatically detects if it is a folder, and begins
+bulk analysis. Per default picky uses 4 analysis process in bulk-analysis, but can be specified with the -m switch.
+Single files only give an individual report, bulk analysis creates the MetaReport-file as well.
 
 You should be inside of picky's directory, and have virtual environment activated (if used). The malware file(s) can be
 located elsewhere.
