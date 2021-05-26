@@ -1,4 +1,15 @@
-Picky! Because there are always a more suitable sample!
+Picky! Because there are always more suitable samples!
+
+Picky is created as part of a master thesis that wanted to improve the workflow and time used finding educationally
+friendly and suitable samples. Picky is not directly a malware analysis framework, as it can overlook features it
+deems unimportant in finding educational malware. What it does is creating reports and trying to find easy and educationally
+friendly malware samples. These reports are created so that an educator more easily can find the best sample for their
+course, and focus more on creating a better lecture than reversing random binaries.
+
+As of now will picky only analyse PE files, and not scripts or documents. It is built so it can be given an arbitrarily
+large folder of malware, and remove unwanted files. Depending on hardware and resources given, it can take around 10 minutes
+to complete a set of 100 samples.
+
 
 Installation:
 git clone --recurse-submodules https://github.com/xor-al-ex/picky.git
