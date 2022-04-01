@@ -958,6 +958,14 @@ def bulk_analyze(dir_path: str) -> None:
     tsprint("[*] Done! See metadata report for tags to the different samples:\n\n" + final_report + "\n" + "-"*20)
 
 
+def just_logs(dir_path: str) -> None:
+    global WORK_DIR
+    log_path = os.path.abspath(dir_path)
+    tsprint("Starting to parse logs inside of " + log_path)
+    final_report = create_meta_report(log_path)
+    tsprint("[*] Done with creating meta-report. See report inside folder.")
+
+
 def pool_error(err):
     tsprint("Pool error, still going strong?")
     print(err)
@@ -996,6 +1004,7 @@ def tsprint(to_print: str) -> None:
     ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
     print(f"{ts}: {to_print}")
 
+
 def main():
     desc = "Picky! Because there are always better things to look at!\nSupposed to be bulk based. Takes a file or dir."
     epilog = ""
@@ -1008,7 +1017,9 @@ def main():
     parser.add_argument("-p", "--dbgprint", action="store_true", help="Print debugging related information.")
     parser.add_argument("-m", "--multiprocess", type=int,
                         help="How many processes to use with bulk analysis. Default is 4.")
-    #parser.add_argument("-h", "--help", action="store_true", help="Print help message and exit.")
+    parser.add_argument("-r", "--just-logs", action="store_true",
+                        help="Analyse just the created PickyReports. Useful when analysis crash/stops. Give path to "
+                             "picky_analysis folder.")
 
     try:
         args = parser.parse_args()
@@ -1022,6 +1033,10 @@ def main():
     if args.multiprocess and args.multiprocess > 0:
         global NUMBERS_OF_CORES_TO_USE
         NUMBERS_OF_CORES_TO_USE = args.multiprocess
+
+    if args.just_logs:
+        just_logs(args.sample)
+        sys.exit(1)
 
     if os.path.isdir(args.sample):
         bulk_analyze(args.sample)
